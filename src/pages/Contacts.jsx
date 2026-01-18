@@ -1,6 +1,6 @@
 // src/pages/Contacts.jsx
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Plus,
   Search,
@@ -8,24 +8,36 @@ import {
   Users,
   Grid3X3,
   List,
-  X
+  X,
+  Upload,
+  Download
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { ContactCard } from '../components/contacts/ContactCard';
 import { ContactForm } from '../components/contacts/ContactForm';
+import { ImportContactsModal } from '../components/contacts/ImportContactsModal';
 
 export const Contacts = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [contacts, setContacts] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || '');
   const [filterInterest, setFilterInterest] = useState('all');
   const [viewMode, setViewMode] = useState('grid'); // 'grid' or 'list'
-  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(searchParams.get('new') === 'true');
+  const [showImportModal, setShowImportModal] = useState(false);
 
   useEffect(() => {
     loadContacts();
   }, []);
+
+  // Abrir modal si viene con ?new=true
+  useEffect(() => {
+    if (searchParams.get('new') === 'true') {
+      setShowCreateModal(true);
+    }
+  }, [searchParams]);
 
   const loadContacts = async () => {
     try {
@@ -71,31 +83,49 @@ export const Contacts = () => {
   const handleContactCreated = () => {
     setShowCreateModal(false);
     loadContacts();
+    // Limpiar el query param
+    navigate('/contacts', { replace: true });
+  };
+
+  const handleImportSuccess = () => {
+    loadContacts();
   };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+      <div className="flex flex-col items-center justify-center h-64 gap-3">
+        <div className="w-10 h-10 border-4 border-primary-500 border-t-transparent rounded-full animate-spin"></div>
+        <p className="text-sm text-gray-500">Cargando contactos...</p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-fade-in">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Contactos</h1>
           <p className="text-gray-500 mt-1">{contacts.length} contactos en total</p>
         </div>
-        <button
-          onClick={() => setShowCreateModal(true)}
-          className="btn-primary"
-        >
-          <Plus size={20} />
-          Nuevo Contacto
-        </button>
+        <div className="flex items-center gap-3">
+          {/* Botón Importar */}
+          <button
+            onClick={() => setShowImportModal(true)}
+            className="btn-secondary"
+          >
+            <Upload size={18} />
+            Importar
+          </button>
+          {/* Botón Nuevo */}
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="btn-primary"
+          >
+            <Plus size={20} />
+            Nuevo Contacto
+          </button>
+        </div>
       </div>
 
       {/* Filters Bar */}
@@ -122,16 +152,16 @@ export const Contacts = () => {
           </div>
 
           {/* Interest Filter */}
-          <div className="flex items-center gap-2">
-            <Filter size={18} className="text-gray-400" />
+          <div className="flex items-center gap-2 overflow-x-auto">
+            <Filter size={18} className="text-gray-400 flex-shrink-0" />
             <div className="flex gap-1">
               {interestFilters.map(filter => (
                 <button
                   key={filter.value}
                   onClick={() => setFilterInterest(filter.value)}
-                  className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                  className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors whitespace-nowrap ${
                     filterInterest === filter.value
-                      ? 'bg-blue-100 text-blue-700'
+                      ? 'bg-primary-100 text-primary-700'
                       : 'text-gray-600 hover:bg-gray-100'
                   }`}
                 >
@@ -149,6 +179,7 @@ export const Contacts = () => {
               className={`p-2 rounded-lg transition-colors ${
                 viewMode === 'grid' ? 'bg-gray-100 text-gray-900' : 'text-gray-400 hover:text-gray-600'
               }`}
+              title="Vista grilla"
             >
               <Grid3X3 size={18} />
             </button>
@@ -157,6 +188,7 @@ export const Contacts = () => {
               className={`p-2 rounded-lg transition-colors ${
                 viewMode === 'list' ? 'bg-gray-100 text-gray-900' : 'text-gray-400 hover:text-gray-600'
               }`}
+              title="Vista lista"
             >
               <List size={18} />
             </button>
@@ -188,16 +220,25 @@ export const Contacts = () => {
           <p className="text-gray-500 mb-4">
             {searchQuery || filterInterest !== 'all'
               ? 'Prueba con otros filtros de búsqueda'
-              : 'Comienza agregando tu primer contacto'}
+              : 'Comienza agregando tu primer contacto o importando desde un archivo'}
           </p>
           {!searchQuery && filterInterest === 'all' && (
-            <button
-              onClick={() => setShowCreateModal(true)}
-              className="btn-primary"
-            >
-              <Plus size={20} />
-              Agregar Contacto
-            </button>
+            <div className="flex items-center justify-center gap-3">
+              <button
+                onClick={() => setShowImportModal(true)}
+                className="btn-secondary"
+              >
+                <Upload size={18} />
+                Importar Excel
+              </button>
+              <button
+                onClick={() => setShowCreateModal(true)}
+                className="btn-primary"
+              >
+                <Plus size={20} />
+                Agregar Contacto
+              </button>
+            </div>
           )}
         </div>
       )}
@@ -205,10 +246,20 @@ export const Contacts = () => {
       {/* Create Modal */}
       {showCreateModal && (
         <ContactForm
-          onClose={() => setShowCreateModal(false)}
+          onClose={() => {
+            setShowCreateModal(false);
+            navigate('/contacts', { replace: true });
+          }}
           onSuccess={handleContactCreated}
         />
       )}
+
+      {/* Import Modal */}
+      <ImportContactsModal
+        isOpen={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        onSuccess={handleImportSuccess}
+      />
     </div>
   );
 };
