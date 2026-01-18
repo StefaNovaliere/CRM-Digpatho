@@ -17,23 +17,17 @@ function App() {
       {/* Redirect root to dashboard */}
       <Route path="/" element={<Navigate to="/dashboard" replace />} />
 
-      {/* Main app with layout */}
-      <Route
-        path="/*"
-        element={
-          <MainLayout>
-            <Routes>
-              <Route path="dashboard" element={<Dashboard />} />
-              <Route path="contacts" element={<Contacts />} />
-              <Route path="contacts/:id" element={<ContactDetail />} />
-              <Route path="institutions" element={<Institutions />} />
-              <Route path="settings" element={<Settings />} />
-              {/* Catch all */}
-              <Route path="*" element={<Navigate to="/dashboard" replace />} />
-            </Routes>
-          </MainLayout>
-        }
-      />
+      {/* Main app with layout wrapper */}
+      <Route element={<MainLayout />}>
+        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/contacts" element={<Contacts />} />
+        <Route path="/contacts/:id" element={<ContactDetail />} />
+        <Route path="/institutions" element={<Institutions />} />
+        <Route path="/settings" element={<Settings />} />
+      </Route>
+
+      {/* Catch all - redirect to dashboard */}
+      <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
   );
 }
