@@ -2,15 +2,12 @@
 import { useState } from 'react';
 import {
   Bell,
-  Sparkles,
   Save,
   CheckCircle,
   Database,
-  Palette,
-  Globe,
   Clock,
-  Shield,
-  Info
+  Info,
+  AlertTriangle
 } from 'lucide-react';
 
 export const Settings = () => {
@@ -20,16 +17,12 @@ export const Settings = () => {
     notifications_email: true,
     notifications_weekly_report: true,
     notifications_followup_reminder: true,
-    ai_tone: 'professional',
-    ai_language: 'es',
-    ai_signature: 'Equipo Digpatho IA',
-    followup_days: 14,
-    timezone: 'America/Argentina/Buenos_Aires'
+    followup_days: 14
   });
 
   const handleSave = async () => {
     setLoading(true);
-    // Simular guardado - en producción guardarías en Supabase
+    // En producción guardarías en Supabase
     await new Promise(r => setTimeout(r, 800));
     setLoading(false);
     setSaved(true);
@@ -37,75 +30,22 @@ export const Settings = () => {
   };
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6">
+    <div className="max-w-3xl mx-auto space-y-6 animate-fade-in">
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Configuración</h1>
-        <p className="text-gray-500 mt-1">Personaliza tu experiencia en Digpatho CRM</p>
+        <p className="text-gray-500 mt-1">Configuración general del CRM</p>
       </div>
 
-      {/* Preferencias de IA */}
-      <div className="card overflow-hidden">
-        <div className="p-5 border-b border-gray-100 bg-gradient-to-r from-[#A349A4]/5 to-transparent">
-          <h2 className="font-semibold text-gray-900 flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-[#A349A4] to-[#7B2D7D] rounded-xl flex items-center justify-center shadow-sm">
-              <Sparkles size={20} className="text-white" />
-            </div>
-            <div>
-              <span>Preferencias de IA</span>
-              <p className="text-sm font-normal text-gray-500">Configura cómo Claude genera tus emails</p>
-            </div>
-          </h2>
-        </div>
-        <div className="p-5 space-y-5">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Tono de comunicación
-              </label>
-              <select
-                value={settings.ai_tone}
-                onChange={(e) => setSettings(s => ({ ...s, ai_tone: e.target.value }))}
-                className="input"
-              >
-                <option value="professional">🎯 Profesional</option>
-                <option value="friendly">😊 Amigable</option>
-                <option value="formal">📋 Formal</option>
-                <option value="casual">💬 Casual</option>
-              </select>
-              <p className="text-xs text-gray-500 mt-1">
-                Define el estilo de los emails generados
-              </p>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Idioma principal
-              </label>
-              <select
-                value={settings.ai_language}
-                onChange={(e) => setSettings(s => ({ ...s, ai_language: e.target.value }))}
-                className="input"
-              >
-                <option value="es">🇪🇸 Español</option>
-                <option value="en">🇺🇸 English</option>
-                <option value="pt">🇧🇷 Português</option>
-              </select>
-            </div>
-          </div>
-
+      {/* Info Box - Configuración de IA movida */}
+      <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl">
+        <div className="flex gap-3">
+          <Info size={20} className="text-blue-500 flex-shrink-0 mt-0.5" />
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Firma de emails
-            </label>
-            <input
-              type="text"
-              value={settings.ai_signature}
-              onChange={(e) => setSettings(s => ({ ...s, ai_signature: e.target.value }))}
-              className="input"
-              placeholder="Tu nombre o firma"
-            />
-            <p className="text-xs text-gray-500 mt-1">
-              Se incluirá al final de cada email generado
+            <p className="text-sm text-blue-800 font-medium">Configuración de IA contextual</p>
+            <p className="text-xs text-blue-600 mt-1">
+              El tono e idioma de los emails generados ahora se configura directamente en cada contacto,
+              permitiéndote personalizar la comunicación según el destinatario.
             </p>
           </div>
         </div>
@@ -139,7 +79,7 @@ export const Settings = () => {
               type="checkbox"
               checked={settings.notifications_followup_reminder}
               onChange={(e) => setSettings(s => ({ ...s, notifications_followup_reminder: e.target.checked }))}
-              className="w-5 h-5 rounded border-gray-300 text-[#A349A4] focus:ring-[#A349A4]"
+              className="w-5 h-5 rounded border-gray-300 text-primary-500 focus:ring-primary-500"
             />
           </label>
 
@@ -157,14 +97,14 @@ export const Settings = () => {
               type="checkbox"
               checked={settings.notifications_email}
               onChange={(e) => setSettings(s => ({ ...s, notifications_email: e.target.checked }))}
-              className="w-5 h-5 rounded border-gray-300 text-[#A349A4] focus:ring-[#A349A4]"
+              className="w-5 h-5 rounded border-gray-300 text-primary-500 focus:ring-primary-500"
             />
           </label>
 
           <label className="flex items-center justify-between p-3 bg-gray-50 rounded-xl cursor-pointer hover:bg-gray-100 transition-colors">
             <div className="flex items-center gap-3">
               <div className="w-8 h-8 bg-violet-100 rounded-lg flex items-center justify-center">
-                <Globe size={16} className="text-violet-600" />
+                <Bell size={16} className="text-violet-600" />
               </div>
               <div>
                 <p className="font-medium text-gray-900">Reporte semanal</p>
@@ -175,18 +115,18 @@ export const Settings = () => {
               type="checkbox"
               checked={settings.notifications_weekly_report}
               onChange={(e) => setSettings(s => ({ ...s, notifications_weekly_report: e.target.checked }))}
-              className="w-5 h-5 rounded border-gray-300 text-[#A349A4] focus:ring-[#A349A4]"
+              className="w-5 h-5 rounded border-gray-300 text-primary-500 focus:ring-primary-500"
             />
           </label>
         </div>
       </div>
 
-      {/* Follow-up Settings */}
+      {/* Reglas de Follow-up */}
       <div className="card overflow-hidden">
         <div className="p-5 border-b border-gray-100">
           <h2 className="font-semibold text-gray-900 flex items-center gap-3">
-            <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center">
-              <Clock size={20} className="text-blue-600" />
+            <div className="w-10 h-10 bg-orange-100 rounded-xl flex items-center justify-center">
+              <Clock size={20} className="text-orange-600" />
             </div>
             <div>
               <span>Reglas de Follow-up</span>
@@ -211,7 +151,7 @@ export const Settings = () => {
               <span className="text-gray-500">días</span>
             </div>
             <p className="text-xs text-gray-500 mt-2">
-              Los contactos sin interacción por este período aparecerán en "Pendientes de Follow-up"
+              Los contactos sin interacción por este período aparecerán en "Pendientes de Follow-up" en el Dashboard
             </p>
           </div>
         </div>
@@ -230,26 +170,25 @@ export const Settings = () => {
             </div>
           </h2>
         </div>
-        <div className="p-5">
+        <div className="p-5 space-y-4">
           <div className="flex items-center justify-between p-4 bg-emerald-50 rounded-xl border border-emerald-200">
             <div className="flex items-center gap-3">
               <div className="w-3 h-3 bg-emerald-500 rounded-full animate-pulse"></div>
               <div>
                 <p className="font-medium text-emerald-800">Conectado a Supabase</p>
-                <p className="text-sm text-emerald-600">RLS desactivado • Modo local</p>
+                <p className="text-sm text-emerald-600">Modo local • RLS desactivado</p>
               </div>
             </div>
-            <Shield size={20} className="text-emerald-500" />
           </div>
 
-          <div className="mt-4 p-4 bg-blue-50 rounded-xl border border-blue-200">
+          <div className="p-4 bg-amber-50 rounded-xl border border-amber-200">
             <div className="flex gap-3">
-              <Info size={20} className="text-blue-500 flex-shrink-0 mt-0.5" />
+              <AlertTriangle size={20} className="text-amber-500 flex-shrink-0 mt-0.5" />
               <div>
-                <p className="text-sm text-blue-800 font-medium">Modo Local Activo</p>
-                <p className="text-xs text-blue-600 mt-1">
-                  Esta instancia está configurada para uso local sin autenticación.
-                  Todos los datos son accesibles públicamente en esta base de datos.
+                <p className="text-sm text-amber-800 font-medium">Modo Local Activo</p>
+                <p className="text-xs text-amber-600 mt-1">
+                  Esta instancia está configurada sin autenticación. Todos los datos son accesibles públicamente.
+                  Solo usar en entornos de desarrollo o redes privadas.
                 </p>
               </div>
             </div>

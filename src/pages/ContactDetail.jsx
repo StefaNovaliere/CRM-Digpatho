@@ -17,7 +17,11 @@ import {
   Video,
   FileText,
   Send,
-  Clock
+  Clock,
+  ChevronDown,
+  Globe,
+  MessageCircle,
+  Zap
 } from 'lucide-react';
 import { formatDistanceToNow, format } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -27,24 +31,51 @@ import { EmailDraftModal } from '../components/email/EmailDraftModal';
 import { ContactForm } from '../components/contacts/ContactForm';
 import { AddInteractionModal } from '../components/interactions/AddInteractionModal';
 
-// Interest Badge
+// ========================================
+// CONFIGURACIÓN DE TONOS E IDIOMAS
+// ========================================
+const TONE_OPTIONS = [
+  { value: 'professional', label: 'Profesional', icon: '🎯', description: 'Formal y directo' },
+  { value: 'empathetic', label: 'Empático', icon: '💙', description: 'Cercano y comprensivo' },
+  { value: 'direct', label: 'Directo', icon: '⚡', description: 'Breve y al punto' },
+];
+
+const LANGUAGE_OPTIONS = [
+  { value: 'es', label: 'Español', flag: '🇪🇸' },
+  { value: 'en', label: 'English', flag: '🇺🇸' },
+  { value: 'pt', label: 'Português', flag: '🇧🇷' },
+];
+
+const EMAIL_TYPE_OPTIONS = [
+  { value: 'follow-up', label: 'Follow-up', description: 'Seguimiento de conversación previa' },
+  { value: 'first-contact', label: 'Primer contacto', description: 'Presentación inicial' },
+  { value: 'post-meeting', label: 'Post-reunión', description: 'Resumen después de una reunión' },
+  { value: 'reactivation', label: 'Reactivación', description: 'Retomar contacto inactivo' },
+];
+
+// ========================================
+// INTEREST BADGE COMPONENT
+// ========================================
 const InterestBadge = ({ level }) => {
   const config = {
-    cold: { label: 'Frío', bg: 'bg-slate-100', text: 'text-slate-600' },
-    warm: { label: 'Tibio', bg: 'bg-amber-50', text: 'text-amber-700' },
-    hot: { label: 'Caliente', bg: 'bg-orange-50', text: 'text-orange-700' },
-    customer: { label: 'Cliente', bg: 'bg-green-50', text: 'text-green-700' },
-    churned: { label: 'Ex-cliente', bg: 'bg-red-50', text: 'text-red-700' }
+    cold: { label: 'Frío', emoji: '❄️', bg: 'bg-slate-100', text: 'text-slate-700' },
+    warm: { label: 'Tibio', emoji: '🌤️', bg: 'bg-amber-100', text: 'text-amber-700' },
+    hot: { label: 'Caliente', emoji: '🔥', bg: 'bg-orange-100', text: 'text-orange-700' },
+    customer: { label: 'Cliente', emoji: '✅', bg: 'bg-emerald-100', text: 'text-emerald-700' },
+    churned: { label: 'Ex-cliente', emoji: '⚠️', bg: 'bg-red-100', text: 'text-red-700' }
   };
-  const { label, bg, text } = config[level] || config.cold;
+  const { label, emoji, bg, text } = config[level] || config.cold;
   return (
-    <span className={`px-3 py-1 rounded-full text-sm font-medium ${bg} ${text}`}>
+    <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium ${bg} ${text}`}>
+      <span>{emoji}</span>
       {label}
     </span>
   );
 };
 
-// Timeline Item
+// ========================================
+// TIMELINE ITEM COMPONENT
+// ========================================
 const TimelineItem = ({ interaction }) => {
   const iconMap = {
     email_sent: { icon: Send, color: 'bg-blue-100 text-blue-600' },
@@ -85,7 +116,7 @@ const TimelineItem = ({ interaction }) => {
           </span>
         </div>
         {interaction.content && (
-          <div className="mt-3 p-4 bg-gray-50 rounded-lg text-sm text-gray-700 whitespace-pre-wrap">
+          <div className="mt-3 p-4 bg-gray-50 rounded-xl text-sm text-gray-700 whitespace-pre-wrap">
             {interaction.content}
           </div>
         )}
@@ -94,6 +125,9 @@ const TimelineItem = ({ interaction }) => {
   );
 };
 
+// ========================================
+// MAIN COMPONENT
+// ========================================
 export const ContactDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -104,6 +138,16 @@ export const ContactDetail = () => {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [showInteractionModal, setShowInteractionModal] = useState(false);
+
+  // ========================================
+  // CONFIGURACIÓN CONTEXTUAL DEL EMAIL (NUEVO)
+  // ========================================
+  const [emailConfig, setEmailConfig] = useState({
+    tone: 'professional',
+    language: 'es',
+    emailType: 'follow-up'
+  });
+  const [showEmailConfig, setShowEmailConfig] = useState(false);
 
   const { generateEmail, isGenerating, generatedDraft, clearDraft } = useEmailGeneration();
 
@@ -141,9 +185,17 @@ export const ContactDetail = () => {
     setInteractions(data || []);
   };
 
+  // ========================================
+  // GENERAR EMAIL CON CONFIGURACIÓN CONTEXTUAL
+  // ========================================
   const handleGenerateEmail = async () => {
-    await generateEmail(id, 'follow-up');
+    // Pasar la configuración contextual al generador
+    await generateEmail(id, emailConfig.emailType, {
+      tone: emailConfig.tone,
+      language: emailConfig.language
+    });
     setShowEmailModal(true);
+    setShowEmailConfig(false);
   };
 
   const handleDelete = async () => {
@@ -156,19 +208,23 @@ export const ContactDetail = () => {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+        <div className="w-10 h-10 border-4 border-primary-500 border-t-transparent rounded-full animate-spin"></div>
       </div>
     );
   }
 
   if (!contact) return null;
 
+  const selectedTone = TONE_OPTIONS.find(t => t.value === emailConfig.tone);
+  const selectedLanguage = LANGUAGE_OPTIONS.find(l => l.value === emailConfig.language);
+  const selectedEmailType = EMAIL_TYPE_OPTIONS.find(e => e.value === emailConfig.emailType);
+
   return (
-    <div className="max-w-5xl mx-auto">
+    <div className="max-w-5xl mx-auto animate-fade-in">
       {/* Back Button */}
       <Link
         to="/contacts"
-        className="inline-flex items-center gap-2 text-gray-600 hover:text-gray-900 font-medium mb-6"
+        className="inline-flex items-center gap-2 text-gray-600 hover:text-gray-900 font-medium mb-6 transition-colors"
       >
         <ArrowLeft size={20} />
         Volver a Contactos
@@ -181,7 +237,7 @@ export const ContactDetail = () => {
           <div className="card p-6">
             <div className="flex items-start justify-between mb-4">
               <div className="flex items-center gap-4">
-                <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl flex items-center justify-center text-white font-bold text-xl shadow-lg">
+                <div className="w-16 h-16 bg-gradient-to-br from-primary-500 to-primary-700 rounded-2xl flex items-center justify-center text-white font-bold text-xl shadow-lg">
                   {contact.first_name[0]}{contact.last_name[0]}
                 </div>
                 <div>
@@ -214,13 +270,13 @@ export const ContactDetail = () => {
             {/* Contact Info */}
             <div className="grid grid-cols-2 gap-4 pt-4 border-t border-gray-100">
               {contact.email && (
-                <a href={`mailto:${contact.email}`} className="flex items-center gap-2 text-gray-600 hover:text-blue-600">
+                <a href={`mailto:${contact.email}`} className="flex items-center gap-2 text-gray-600 hover:text-primary-600 transition-colors">
                   <Mail size={16} className="text-gray-400" />
                   {contact.email}
                 </a>
               )}
               {contact.phone && (
-                <a href={`tel:${contact.phone}`} className="flex items-center gap-2 text-gray-600 hover:text-blue-600">
+                <a href={`tel:${contact.phone}`} className="flex items-center gap-2 text-gray-600 hover:text-primary-600 transition-colors">
                   <Phone size={16} className="text-gray-400" />
                   {contact.phone}
                 </a>
@@ -238,7 +294,7 @@ export const ContactDetail = () => {
                 </div>
               )}
               {contact.linkedin_url && (
-                <a href={contact.linkedin_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-gray-600 hover:text-blue-600">
+                <a href={contact.linkedin_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-gray-600 hover:text-primary-600 transition-colors">
                   <Linkedin size={16} className="text-gray-400" />
                   LinkedIn
                 </a>
@@ -247,9 +303,12 @@ export const ContactDetail = () => {
 
             {/* AI Context */}
             {contact.ai_context && (
-              <div className="mt-4 p-4 bg-violet-50 rounded-xl">
-                <p className="text-sm font-medium text-violet-700 mb-1">💡 Contexto para IA</p>
-                <p className="text-sm text-violet-600">{contact.ai_context}</p>
+              <div className="mt-4 p-4 bg-primary-50 rounded-xl border border-primary-100">
+                <p className="text-sm font-medium text-primary-700 mb-1 flex items-center gap-2">
+                  <Sparkles size={14} />
+                  Contexto para IA
+                </p>
+                <p className="text-sm text-primary-600">{contact.ai_context}</p>
               </div>
             )}
 
@@ -257,7 +316,7 @@ export const ContactDetail = () => {
             {contact.tags && contact.tags.length > 0 && (
               <div className="flex flex-wrap gap-2 mt-4">
                 {contact.tags.map((tag, i) => (
-                  <span key={i} className="px-2 py-1 bg-gray-100 text-gray-600 text-sm rounded-md">
+                  <span key={i} className="px-2 py-1 bg-gray-100 text-gray-600 text-sm rounded-lg">
                     {tag}
                   </span>
                 ))}
@@ -296,7 +355,7 @@ export const ContactDetail = () => {
                   <p className="text-gray-500">No hay interacciones registradas</p>
                   <button
                     onClick={() => setShowInteractionModal(true)}
-                    className="mt-3 text-sm text-blue-600 hover:text-blue-700 font-medium"
+                    className="mt-3 text-sm text-primary-600 hover:text-primary-700 font-medium"
                   >
                     Agregar primera interacción
                   </button>
@@ -306,34 +365,130 @@ export const ContactDetail = () => {
           </div>
         </div>
 
-        {/* Sidebar */}
+        {/* ========================================
+            SIDEBAR CON GENERADOR DE EMAIL MEJORADO
+            ======================================== */}
         <div className="space-y-6">
-          {/* AI Actions */}
-          <div className="card p-5">
-            <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
-              <Sparkles size={18} className="text-violet-600" />
-              Acciones con IA
-            </h3>
-            <button
-              onClick={handleGenerateEmail}
-              disabled={isGenerating}
-              className="w-full btn bg-gradient-to-r from-violet-600 to-blue-600 text-white hover:from-violet-700 hover:to-blue-700 justify-center py-3"
-            >
-              {isGenerating ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  Generando...
-                </>
-              ) : (
-                <>
-                  <Mail size={18} />
-                  Generar Follow-up
-                </>
-              )}
-            </button>
-            <p className="text-xs text-gray-500 text-center mt-2">
-              Genera un email personalizado basado en el historial
-            </p>
+          {/* AI Email Generator Card */}
+          <div className="card overflow-hidden">
+            <div className="p-4 bg-gradient-to-r from-primary-500 to-primary-700 text-white">
+              <h3 className="font-semibold flex items-center gap-2">
+                <Sparkles size={18} />
+                Generar Email con IA
+              </h3>
+              <p className="text-sm text-primary-100 mt-1">
+                Personaliza el estilo para este contacto
+              </p>
+            </div>
+
+            <div className="p-4 space-y-4">
+              {/* Tipo de Email */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Tipo de Email
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {EMAIL_TYPE_OPTIONS.map(option => (
+                    <button
+                      key={option.value}
+                      onClick={() => setEmailConfig(prev => ({ ...prev, emailType: option.value }))}
+                      className={`p-2 text-left rounded-xl border-2 transition-all ${
+                        emailConfig.emailType === option.value
+                          ? 'border-primary-500 bg-primary-50'
+                          : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      <p className={`text-sm font-medium ${
+                        emailConfig.emailType === option.value ? 'text-primary-700' : 'text-gray-900'
+                      }`}>
+                        {option.label}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Tono */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
+                  <MessageCircle size={14} />
+                  Tono
+                </label>
+                <div className="flex gap-2">
+                  {TONE_OPTIONS.map(option => (
+                    <button
+                      key={option.value}
+                      onClick={() => setEmailConfig(prev => ({ ...prev, tone: option.value }))}
+                      className={`flex-1 p-3 rounded-xl border-2 transition-all text-center ${
+                        emailConfig.tone === option.value
+                          ? 'border-primary-500 bg-primary-50'
+                          : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                      title={option.description}
+                    >
+                      <span className="text-lg">{option.icon}</span>
+                      <p className={`text-xs font-medium mt-1 ${
+                        emailConfig.tone === option.value ? 'text-primary-700' : 'text-gray-600'
+                      }`}>
+                        {option.label}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Idioma */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
+                  <Globe size={14} />
+                  Idioma
+                </label>
+                <div className="flex gap-2">
+                  {LANGUAGE_OPTIONS.map(option => (
+                    <button
+                      key={option.value}
+                      onClick={() => setEmailConfig(prev => ({ ...prev, language: option.value }))}
+                      className={`flex-1 p-2 rounded-xl border-2 transition-all text-center ${
+                        emailConfig.language === option.value
+                          ? 'border-primary-500 bg-primary-50'
+                          : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      <span className="text-lg">{option.flag}</span>
+                      <p className={`text-xs font-medium mt-0.5 ${
+                        emailConfig.language === option.value ? 'text-primary-700' : 'text-gray-600'
+                      }`}>
+                        {option.label}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Generate Button */}
+              <button
+                onClick={handleGenerateEmail}
+                disabled={isGenerating}
+                className="w-full btn bg-gradient-to-r from-primary-500 to-primary-700 text-white hover:from-primary-600 hover:to-primary-800 justify-center py-3 mt-2"
+              >
+                {isGenerating ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Generando...
+                  </>
+                ) : (
+                  <>
+                    <Zap size={18} />
+                    Generar {selectedEmailType?.label}
+                  </>
+                )}
+              </button>
+
+              {/* Config Summary */}
+              <p className="text-xs text-gray-500 text-center">
+                {selectedTone?.icon} {selectedTone?.label} • {selectedLanguage?.flag} {selectedLanguage?.label}
+              </p>
+            </div>
           </div>
 
           {/* Quick Stats */}
@@ -393,7 +548,7 @@ export const ContactDetail = () => {
           onSuccess={() => {
             setShowInteractionModal(false);
             loadInteractions();
-            loadContact(); // Refresh stats
+            loadContact();
           }}
         />
       )}
