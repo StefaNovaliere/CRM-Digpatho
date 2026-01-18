@@ -33,25 +33,32 @@ const CRM_FIELDS = [
   { key: 'ai_context', label: 'Notas / Contexto IA', required: false },
 ];
 
-// Mapeo de roles del Excel a valores del CRM
+// Mapeo de roles del Excel a valores del CRM (ENUM values)
+// IMPORTANTE: Solo estos valores son válidos en la DB: 'pathologist', 'researcher', 'hospital_director', 'lab_manager', 'procurement', 'other'
 const ROLE_MAPPING = {
   'patólogo': 'pathologist',
   'patologo': 'pathologist',
   'patóloga': 'pathologist',
+  'anatomía patológica': 'pathologist',
+  'anatomia patologica': 'pathologist',
   'investigador': 'researcher',
   'investigadora': 'researcher',
+  'research': 'researcher',
   'director': 'hospital_director',
   'directora': 'hospital_director',
   'jefe': 'hospital_director',
   'jefa': 'hospital_director',
   'gerente': 'lab_manager',
   'lab manager': 'lab_manager',
+  'laboratorio': 'lab_manager',
   'compras': 'procurement',
   'adquisiciones': 'procurement',
+  'procurement': 'procurement',
   'médico': 'pathologist',
   'médica': 'pathologist',
   'medico': 'pathologist',
   'medica': 'pathologist',
+  'staff': 'pathologist',
 };
 
 // Mapeo de niveles de interés
@@ -240,15 +247,19 @@ export const ImportContactsModal = ({ isOpen, onClose, onSuccess }) => {
 
   // Separar nombre completo en nombre y apellido
   const splitName = (fullName) => {
+    if (!fullName) return { firstName: '', lastName: '' };
+
     // Quitar títulos como "Dr.", "Dra.", "Lic.", etc.
     const cleanName = fullName
-      .replace(/^(dr\.?|dra\.?|lic\.?|ing\.?|prof\.?)\s+/i, '')
+      .replace(/^(dr\.?|dra\.?|lic\.?|ing\.?|prof\.?|mg\.?|esp\.?)\s+/i, '')
       .trim();
 
-    const parts = cleanName.split(/\s+/);
+    const parts = cleanName.split(/\s+/).filter(p => p.length > 0);
 
-    if (parts.length === 1) {
-      return { firstName: parts[0], lastName: '' };
+    if (parts.length === 0) {
+      return { firstName: 'Sin nombre', lastName: '-' };
+    } else if (parts.length === 1) {
+      return { firstName: parts[0], lastName: '-' }; // Apellido requerido, poner placeholder
     } else if (parts.length === 2) {
       return { firstName: parts[0], lastName: parts[1] };
     } else {
@@ -260,15 +271,17 @@ export const ImportContactsModal = ({ isOpen, onClose, onSuccess }) => {
     }
   };
 
-  // Normalizar rol
+  // Normalizar rol - DEBE devolver un valor válido del ENUM
   const normalizeRole = (value) => {
+    if (!value) return 'other';
     const lower = value.toLowerCase();
+
     for (const [keyword, role] of Object.entries(ROLE_MAPPING)) {
       if (lower.includes(keyword)) {
         return role;
       }
     }
-    return 'other';
+    return 'other'; // Default siempre válido
   };
 
   // Normalizar nivel de interés
@@ -328,29 +341,45 @@ export const ImportContactsModal = ({ isOpen, onClose, onSuccess }) => {
       const contactsToInsert = validContacts.map(c => {
         const { institution_name, ...rest } = c;
         return {
-          ...rest,
+          first_name: rest.first_name,
+          last_name: rest.last_name || '', // Asegurar que no sea null
+          email: rest.email || null,
+          phone: rest.phone || null,
+          linkedin_url: rest.linkedin_url || null,
           institution_id: institution_name ? institutionMap[institution_name] : null,
+          role: rest.role || 'other',
+          job_title: rest.job_title || null,
           interest_level: rest.interest_level || 'cold',
+          source: rest.source || 'Importación Excel',
+          ai_context: rest.ai_context || null,
         };
       });
 
-      // Insertar en batches de 50
-      const batchSize = 50;
+      // Insertar uno por uno para manejar errores individuales (ej: email duplicado)
       let inserted = 0;
       let errors = 0;
+      const seenEmails = new Set();
 
-      for (let i = 0; i < contactsToInsert.length; i += batchSize) {
-        const batch = contactsToInsert.slice(i, i + batchSize);
+      for (const contact of contactsToInsert) {
+        // Skip si ya vimos este email en este batch (evitar duplicados internos)
+        if (contact.email && seenEmails.has(contact.email.toLowerCase())) {
+          errors++;
+          continue;
+        }
+        if (contact.email) {
+          seenEmails.add(contact.email.toLowerCase());
+        }
+
         const { data, error } = await supabase
           .from('contacts')
-          .insert(batch)
+          .insert([contact])
           .select();
 
         if (error) {
-          console.error('Batch error:', error);
-          errors += batch.length;
+          console.error('Error inserting contact:', contact.first_name, contact.last_name, error.message);
+          errors++;
         } else {
-          inserted += data.length;
+          inserted++;
         }
       }
 
