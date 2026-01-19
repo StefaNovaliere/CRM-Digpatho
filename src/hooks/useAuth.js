@@ -2,9 +2,6 @@
 import { useState, useEffect, createContext, useContext } from 'react';
 import { supabase } from '../lib/supabase';
 
-// ========================================
-// CONTEXT
-// ========================================
 const AuthContext = createContext(null);
 
 export const useAuth = () => {
@@ -15,27 +12,21 @@ export const useAuth = () => {
   return context;
 };
 
-// ========================================
-// PROVIDER
-// ========================================
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Cargar sesión inicial
   useEffect(() => {
     const initAuth = async () => {
       try {
-        // Obtener sesión actual
         const { data: { session } } = await supabase.auth.getSession();
 
         if (session?.user) {
           setUser(session.user);
           await loadProfile(session.user.id);
 
-          // Guardar tokens de Google si vienen en la sesión
           if (session.provider_token) {
             await saveGoogleTokens(session);
           }
@@ -50,7 +41,6 @@ export const AuthProvider = ({ children }) => {
 
     initAuth();
 
-    // Escuchar cambios de autenticación
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         console.log('Auth event:', event);
@@ -59,7 +49,6 @@ export const AuthProvider = ({ children }) => {
           setUser(session.user);
           await loadProfile(session.user.id);
 
-          // Guardar tokens de Google
           if (session.provider_token) {
             await saveGoogleTokens(session);
           }
@@ -78,22 +67,20 @@ export const AuthProvider = ({ children }) => {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Cargar perfil del usuario
   const loadProfile = async (userId) => {
     try {
-      const { data, error } = await supabase
+      const { data, error: profileError } = await supabase
         .from('user_profiles')
         .select('*')
         .eq('id', userId)
         .single();
 
-      if (error && error.code !== 'PGRST116') {
-        throw error;
+      if (profileError && profileError.code !== 'PGRST116') {
+        throw profileError;
       }
 
       setProfile(data);
 
-      // Actualizar último login
       if (data) {
         await supabase
           .from('user_profiles')
@@ -105,7 +92,6 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // Guardar tokens de Google para Gmail API
   const saveGoogleTokens = async (session) => {
     if (!session.user?.id || !session.provider_token) return;
 
@@ -124,15 +110,14 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // Login con Google (incluye permisos de Gmail)
   const signInWithGoogle = async () => {
     setError(null);
 
-    const { data, error } = await supabase.auth.signInWithOAuth({
+    const { data, error: signInError } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
         scopes: 'https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly',
-        redirectTo: `${window.location.origin}/dashboard`,
+        redirectTo: window.location.origin + '/dashboard',
         queryParams: {
           access_type: 'offline',
           prompt: 'consent'
@@ -140,30 +125,28 @@ export const AuthProvider = ({ children }) => {
       }
     });
 
-    if (error) {
-      setError(error.message);
-      throw error;
+    if (signInError) {
+      setError(signInError.message);
+      throw signInError;
     }
 
     return data;
   };
 
-  // Logout
   const signOut = async () => {
-    const { error } = await supabase.auth.signOut();
-    if (error) {
-      setError(error.message);
-      throw error;
+    const { error: signOutError } = await supabase.auth.signOut();
+    if (signOutError) {
+      setError(signOutError.message);
+      throw signOutError;
     }
     setUser(null);
     setProfile(null);
   };
 
-  // Actualizar perfil
   const updateProfile = async (updates) => {
-    if (!user?.id) return;
+    if (!user?.id) return null;
 
-    const { data, error } = await supabase
+    const { data, error: updateError } = await supabase
       .from('user_profiles')
       .update({
         ...updates,
@@ -173,27 +156,24 @@ export const AuthProvider = ({ children }) => {
       .select()
       .single();
 
-    if (error) throw error;
+    if (updateError) throw updateError;
     setProfile(data);
     return data;
   };
 
-  // Obtener token de Google válido (refresh si es necesario)
   const getGoogleAccessToken = async () => {
     if (!profile?.google_access_token) {
       throw new Error('No hay token de Google. Por favor, vuelve a iniciar sesión.');
     }
 
-    // Verificar si el token expiró
     if (profile.google_token_expires_at) {
       const expiresAt = new Date(profile.google_token_expires_at);
       const now = new Date();
 
-      // Si expira en menos de 5 minutos, refrescar sesión
       if (expiresAt.getTime() - now.getTime() < 5 * 60 * 1000) {
-        const { data: { session }, error } = await supabase.auth.refreshSession();
+        const { data: { session }, error: refreshError } = await supabase.auth.refreshSession();
 
-        if (error || !session?.provider_token) {
+        if (refreshError || !session?.provider_token) {
           throw new Error('No se pudo refrescar el token. Por favor, vuelve a iniciar sesión.');
         }
 
