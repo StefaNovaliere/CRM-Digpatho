@@ -14,14 +14,18 @@ import {
   ChevronDown,
   Microscope,
   HelpCircle,
-  ExternalLink
+  LogOut,
+  User
 } from 'lucide-react';
+import { useAuth } from '../../hooks/useAuth';
 
 export const MainLayout = () => {
   const navigate = useNavigate();
+  const { user, profile, signOut } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
 
   const handleSearch = (e) => {
     e.preventDefault();
@@ -29,6 +33,11 @@ export const MainLayout = () => {
       navigate(`/contacts?search=${encodeURIComponent(searchQuery)}`);
       setSearchQuery('');
     }
+  };
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate('/login');
   };
 
   const navigation = [
@@ -40,6 +49,17 @@ export const MainLayout = () => {
   const secondaryNav = [
     { to: '/settings', icon: Settings, label: 'Configuración' },
   ];
+
+  // Obtener iniciales del usuario
+  const getInitials = () => {
+    if (profile?.full_name) {
+      return profile.full_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
+    }
+    if (user?.email) {
+      return user.email[0].toUpperCase();
+    }
+    return 'U';
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -121,11 +141,29 @@ export const MainLayout = () => {
             </div>
           </div>
 
-          {/* Footer */}
-          <div className="px-6 py-4 border-t border-gray-100 bg-gray-50/50">
-            <p className="text-[11px] text-gray-400 text-center">
-              Digpatho CRM v1.0
-            </p>
+          {/* User Info */}
+          <div className="px-4 py-3 border-t border-gray-100 bg-gray-50/50">
+            <div className="flex items-center gap-3">
+              {profile?.avatar_url ? (
+                <img
+                  src={profile.avatar_url}
+                  alt={profile.full_name}
+                  className="w-9 h-9 rounded-xl object-cover"
+                />
+              ) : (
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center text-white text-sm font-semibold">
+                  {getInitials()}
+                </div>
+              )}
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-gray-900 truncate">
+                  {profile?.full_name || 'Usuario'}
+                </p>
+                <p className="text-xs text-gray-500 truncate">
+                  {user?.email}
+                </p>
+              </div>
+            </div>
           </div>
         </div>
       </aside>
@@ -192,13 +230,59 @@ export const MainLayout = () => {
               {/* Divider */}
               <div className="w-px h-8 mx-2 bg-gray-200" />
 
-              {/* User */}
-              <button className="flex items-center gap-2 p-1.5 rounded-xl hover:bg-gray-100 transition-colors">
-                <div className="flex items-center justify-center w-9 h-9 text-sm font-semibold text-white rounded-xl avatar">
-                  D
-                </div>
-                <ChevronDown className="w-4 h-4 text-gray-400" />
-              </button>
+              {/* User Menu */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowUserMenu(!showUserMenu)}
+                  className="flex items-center gap-2 p-1.5 rounded-xl hover:bg-gray-100 transition-colors"
+                >
+                  {profile?.avatar_url ? (
+                    <img
+                      src={profile.avatar_url}
+                      alt={profile.full_name}
+                      className="w-9 h-9 rounded-xl object-cover"
+                    />
+                  ) : (
+                    <div className="flex items-center justify-center w-9 h-9 text-sm font-semibold text-white rounded-xl avatar">
+                      {getInitials()}
+                    </div>
+                  )}
+                  <ChevronDown className="w-4 h-4 text-gray-400" />
+                </button>
+
+                {/* User Dropdown */}
+                {showUserMenu && (
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={() => setShowUserMenu(false)} />
+                    <div className="absolute right-0 z-20 w-64 mt-2 overflow-hidden bg-white border border-gray-200 rounded-2xl shadow-soft animate-slide-down">
+                      {/* User Info */}
+                      <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
+                        <p className="font-medium text-gray-900">{profile?.full_name || 'Usuario'}</p>
+                        <p className="text-sm text-gray-500 truncate">{user?.email}</p>
+                      </div>
+
+                      {/* Menu Items */}
+                      <div className="p-2">
+                        <NavLink
+                          to="/settings"
+                          onClick={() => setShowUserMenu(false)}
+                          className="flex items-center gap-3 px-3 py-2 text-sm text-gray-700 rounded-lg hover:bg-gray-100 transition-colors"
+                        >
+                          <User className="w-4 h-4" />
+                          Mi Perfil
+                        </NavLink>
+                        <button
+                          onClick={handleSignOut}
+                          className="w-full flex items-center gap-3 px-3 py-2 text-sm text-red-600 rounded-lg hover:bg-red-50 transition-colors"
+                        >
+                          <LogOut className="w-4 h-4" />
+                          Cerrar Sesión
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
           </div>
         </header>
