@@ -1,6 +1,6 @@
 // src/App.jsx
 import { Routes, Route, Navigate } from 'react-router-dom';
-import { AuthProvider } from './hooks/useAuth';
+import { AuthProvider } from './hooks/useAuth.jsx';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
 
 // Layout
