@@ -29,7 +29,36 @@ export const Contacts = () => {
   const [showImportModal, setShowImportModal] = useState(false);
 
   useEffect(() => {
+    let mounted = true;
+
+    const loadContacts = async () => {
+      try {
+        console.log("Cargando contactos...");
+        const { data, error } = await supabase
+          .from('contacts')
+          .select(`
+            *,
+            institution:institutions(id, name, city)
+          `)
+          .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        if (mounted) {
+            setContacts(data || []);
+        }
+      } catch (error) {
+        console.error('Error loading contacts:', error);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+
     loadContacts();
+
+    return () => {
+        mounted = false;
+    };
   }, []);
 
   // Abrir modal si viene con ?new=true
@@ -39,23 +68,13 @@ export const Contacts = () => {
     }
   }, [searchParams]);
 
-  const loadContacts = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('contacts')
-        .select(`
-          *,
-          institution:institutions(id, name, city)
-        `)
-        .order('created_at', { ascending: false });
+  const handleContactCreated = () => {
+    setShowCreateModal(false);
+    window.location.reload();
+  };
 
-      if (error) throw error;
-      setContacts(data || []);
-    } catch (error) {
-      console.error('Error loading contacts:', error);
-    } finally {
-      setLoading(false);
-    }
+  const handleImportSuccess = () => {
+    window.location.reload();
   };
 
   // Filter contacts
@@ -79,17 +98,6 @@ export const Contacts = () => {
     { value: 'cold', label: '❄️ Fríos', count: contacts.filter(c => c.interest_level === 'cold').length },
     { value: 'customer', label: '✅ Clientes', count: contacts.filter(c => c.interest_level === 'customer').length },
   ];
-
-  const handleContactCreated = () => {
-    setShowCreateModal(false);
-    loadContacts();
-    // Limpiar el query param
-    navigate('/contacts', { replace: true });
-  };
-
-  const handleImportSuccess = () => {
-    loadContacts();
-  };
 
   if (loading) {
     return (

@@ -244,35 +244,59 @@ export const Institutions = () => {
   const [editingInstitution, setEditingInstitution] = useState(null);
 
   useEffect(() => {
-    loadData();
-  }, []);
+    let mounted = true;
 
-  const loadData = async () => {
-    const { data: insts } = await supabase
-      .from('institutions')
-      .select('*')
-      .order('name');
+    const loadData = async () => {
+      try {
+        console.log('Cargando instituciones...');
 
-    const { data: contacts } = await supabase
-      .from('contacts')
-      .select('institution_id');
+        const { data: insts, error: instError } = await supabase
+          .from('institutions')
+          .select('*')
+          .order('name');
 
-    const counts = {};
-    contacts?.forEach(c => {
-      if (c.institution_id) {
-        counts[c.institution_id] = (counts[c.institution_id] || 0) + 1;
+        if (instError) throw instError;
+
+        const { data: contacts, error: contactsError } = await supabase
+          .from('contacts')
+          .select('institution_id');
+
+        if (contactsError) throw contactsError;
+
+        if (mounted) {
+            const counts = {};
+            contacts?.forEach(c => {
+              if (c.institution_id) {
+                counts[c.institution_id] = (counts[c.institution_id] || 0) + 1;
+              }
+            });
+
+            setInstitutions(insts || []);
+            setContactCounts(counts);
+        }
+      } catch (error) {
+          console.error('Error cargando instituciones:', error);
+      } finally {
+        if (mounted) setLoading(false);
       }
-    });
+    };
 
-    setInstitutions(insts || []);
-    setContactCounts(counts);
-    setLoading(false);
-  };
+    loadData();
+
+    return () => {
+        mounted = false;
+    };
+  }, []);
 
   const handleDelete = async (inst) => {
     if (!window.confirm(`¿Eliminar "${inst.name}"?`)) return;
-    await supabase.from('institutions').delete().eq('id', inst.id);
-    loadData();
+    try {
+        await supabase.from('institutions').delete().eq('id', inst.id);
+        // Recargar la página es una forma rápida de refrescar el estado
+        window.location.reload();
+    } catch(err) {
+        console.error("Error borrando", err);
+    }
   };
 
   const filteredInstitutions = institutions.filter(inst =>
@@ -338,7 +362,7 @@ export const Institutions = () => {
         <InstitutionForm
           institution={editingInstitution}
           onClose={() => { setShowForm(false); setEditingInstitution(null); }}
-          onSuccess={() => { setShowForm(false); setEditingInstitution(null); loadData(); }}
+          onSuccess={() => { setShowForm(false); setEditingInstitution(null); window.location.reload(); }}
         />
       )}
     </div>

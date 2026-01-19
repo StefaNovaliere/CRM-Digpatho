@@ -163,69 +163,84 @@ export const Dashboard = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let mounted = true;
+
+    const loadDashboardData = async () => {
+      try {
+        console.log("Cargando Dashboard...");
+
+        // Get contacts
+        const { data: contacts, error: errContacts } = await supabase
+          .from('contacts')
+          .select('id, interest_level');
+        if (errContacts) throw errContacts;
+
+        // Get institutions count
+        const { count: institutionsCount, error: errInst } = await supabase
+          .from('institutions')
+          .select('id', { count: 'exact' });
+        if (errInst) throw errInst;
+
+        // Get sent emails count
+        const { count: emailsCount, error: errEmails } = await supabase
+          .from('email_drafts')
+          .select('id', { count: 'exact' })
+          .eq('status', 'sent');
+        if (errEmails) throw errEmails;
+
+        // Recent contacts
+        const { data: recent, error: errRecent } = await supabase
+          .from('contacts')
+          .select(`
+            id, first_name, last_name, interest_level,
+            institution:institutions(name)
+          `)
+          .order('created_at', { ascending: false })
+          .limit(5);
+        if (errRecent) throw errRecent;
+
+        // Pending follow-ups (no interaction in 14+ days)
+        const twoWeeksAgo = new Date();
+        twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
+
+        const { data: pending, error: errPending } = await supabase
+          .from('contacts')
+          .select(`
+            id, first_name, last_name, last_interaction_at,
+            institution:institutions(name)
+          `)
+          .not('interest_level', 'in', '("cold","churned")')
+          .or(`last_interaction_at.lt.${twoWeeksAgo.toISOString()},last_interaction_at.is.null`)
+          .order('last_interaction_at', { ascending: true, nullsFirst: true })
+          .limit(5);
+        if (errPending) throw errPending;
+
+        if (mounted) {
+            setStats({
+                totalContacts: contacts?.length || 0,
+                hotLeads: contacts?.filter(c => c.interest_level === 'hot').length || 0,
+                warmLeads: contacts?.filter(c => c.interest_level === 'warm').length || 0,
+                coldLeads: contacts?.filter(c => c.interest_level === 'cold').length || 0,
+                institutions: institutionsCount || 0,
+                emailsSent: emailsCount || 0
+            });
+
+            setRecentContacts(recent || []);
+            setPendingFollowups(pending || []);
+        }
+      } catch (error) {
+        console.error('Error loading dashboard:', error);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+
     loadDashboardData();
+
+    return () => {
+        mounted = false;
+    };
   }, []);
-
-  const loadDashboardData = async () => {
-    try {
-      // Get contacts
-      const { data: contacts } = await supabase
-        .from('contacts')
-        .select('id, interest_level');
-
-      // Get institutions count
-      const { count: institutionsCount } = await supabase
-        .from('institutions')
-        .select('id', { count: 'exact' });
-
-      // Get sent emails count
-      const { count: emailsCount } = await supabase
-        .from('email_drafts')
-        .select('id', { count: 'exact' })
-        .eq('status', 'sent');
-
-      // Recent contacts
-      const { data: recent } = await supabase
-        .from('contacts')
-        .select(`
-          id, first_name, last_name, interest_level,
-          institution:institutions(name)
-        `)
-        .order('created_at', { ascending: false })
-        .limit(5);
-
-      // Pending follow-ups (no interaction in 14+ days)
-      const twoWeeksAgo = new Date();
-      twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
-
-      const { data: pending } = await supabase
-        .from('contacts')
-        .select(`
-          id, first_name, last_name, last_interaction_at,
-          institution:institutions(name)
-        `)
-        .not('interest_level', 'in', '("cold","churned")')
-        .or(`last_interaction_at.lt.${twoWeeksAgo.toISOString()},last_interaction_at.is.null`)
-        .order('last_interaction_at', { ascending: true, nullsFirst: true })
-        .limit(5);
-
-      setStats({
-        totalContacts: contacts?.length || 0,
-        hotLeads: contacts?.filter(c => c.interest_level === 'hot').length || 0,
-        warmLeads: contacts?.filter(c => c.interest_level === 'warm').length || 0,
-        coldLeads: contacts?.filter(c => c.interest_level === 'cold').length || 0,
-        institutions: institutionsCount || 0,
-        emailsSent: emailsCount || 0
-      });
-
-      setRecentContacts(recent || []);
-      setPendingFollowups(pending || []);
-    } catch (error) {
-      console.error('Error loading dashboard:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   if (loading) {
     return (
