@@ -1,5 +1,5 @@
-// src/hooks/useAuth.js
-import { useState, useEffect, createContext, useContext } from 'react';
+// src/hooks/useAuth.jsx
+import { useState, useEffect, createContext, useContext, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 
 const AuthContext = createContext(null);
@@ -18,8 +18,14 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Funciones auxiliares definidas fuera del useEffect para que sean estables
-  const loadProfile = async (userId) => {
+  // Cargar perfil del usuario - CON MANEJO DE ERRORES ROBUSTO
+  const loadProfile = useCallback(async (userId) => {
+    // Si no hay userId, no hacer nada
+    if (!userId) {
+      console.log('loadProfile: No userId provided');
+      return null;
+    }
+
     try {
       const { data, error: profileError } = await supabase
         .from('user_profiles')
@@ -27,69 +33,123 @@ export const AuthProvider = ({ children }) => {
         .eq('id', userId)
         .single();
 
-      if (profileError && profileError.code !== 'PGRST116') {
-        throw profileError;
+      // PGRST116 = no rows returned (perfil no existe aún)
+      if (profileError) {
+        if (profileError.code === 'PGRST116') {
+          // Perfil no existe - esto es normal para usuarios nuevos
+          console.log('Profile not found for user, will be created on first login');
+          setProfile(null);
+          return null;
+        }
+        // Otro error (ej: tabla no existe, RLS, etc.)
+        console.error('Error loading profile:', profileError);
+        setProfile(null);
+        return null;
       }
 
       setProfile(data);
 
+      // Actualizar último login (fire and forget, no esperamos)
       if (data) {
-        // Actualizar last_login sin bloquear
-        await supabase
+        supabase
           .from('user_profiles')
           .update({ last_login_at: new Date().toISOString() })
-          .eq('id', userId);
+          .eq('id', userId)
+          .then(() => {})
+          .catch((err) => console.warn('Could not update last_login_at:', err));
       }
-    } catch (err) {
-      console.warn('Error loading profile (puede ser normal si es login nuevo):', err);
-      // No seteamos error global para no romper la UI
-    }
-  };
 
-  const saveGoogleTokens = async (session) => {
-    if (!session.user?.id || !session.provider_token) return;
+      return data;
+    } catch (err) {
+      console.error('Unexpected error loading profile:', err);
+      setProfile(null);
+      return null;
+    }
+  }, []);
+
+  // Guardar tokens de Google para Gmail API
+  const saveGoogleTokens = useCallback(async (session) => {
+    if (!session?.user?.id || !session?.provider_token) return;
 
     try {
       const expiresAt = new Date();
       expiresAt.setSeconds(expiresAt.getSeconds() + (session.expires_in || 3600));
 
-      // Importante: Esto fallará si no tienes la función RPC creada en Supabase,
-      // pero el catch evitará que la app se cuelgue.
-      await supabase.rpc('update_google_tokens', {
+      // Intentar con RPC primero
+      const { error: rpcError } = await supabase.rpc('update_google_tokens', {
         p_user_id: session.user.id,
         p_access_token: session.provider_token,
         p_refresh_token: session.provider_refresh_token || null,
         p_expires_at: expiresAt.toISOString()
       });
-    } catch (err) {
-      console.warn('Error saving Google tokens:', err);
-    }
-  };
 
+      if (rpcError) {
+        // Si la función RPC no existe, intentar update directo
+        console.warn('RPC update_google_tokens failed, trying direct update:', rpcError);
+
+        await supabase
+          .from('user_profiles')
+          .update({
+            google_access_token: session.provider_token,
+            google_refresh_token: session.provider_refresh_token || null,
+            google_token_expires_at: expiresAt.toISOString(),
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', session.user.id);
+      }
+    } catch (err) {
+      // No bloquear la app si falla guardar tokens
+      console.warn('Error saving Google tokens (non-blocking):', err);
+    }
+  }, []);
+
+  // Inicialización - SOLO UNA VEZ
   useEffect(() => {
     let mounted = true;
+    let authSubscription = null;
 
     const initAuth = async () => {
       try {
-        // 1. Obtener sesión inicial
-        const { data: { session } } = await supabase.auth.getSession();
+        console.log('Initializing auth...');
 
-        if (mounted) {
-          if (session?.user) {
+        // Obtener sesión actual
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+
+        if (sessionError) {
+          console.error('Error getting session:', sessionError);
+          if (mounted) {
+            setUser(null);
+            setProfile(null);
+            setLoading(false);
+          }
+          return;
+        }
+
+        if (session?.user) {
+          console.log('Session found for user:', session.user.email);
+          if (mounted) {
             setUser(session.user);
-            // Intentamos cargar perfil y tokens, pero capturamos errores individualmente
-            await loadProfile(session.user.id).catch(e => console.warn(e));
+            await loadProfile(session.user.id);
 
+            // Guardar tokens de Google si vienen en la sesión
             if (session.provider_token) {
-              await saveGoogleTokens(session).catch(e => console.warn(e));
+              saveGoogleTokens(session);
             }
+          }
+        } else {
+          console.log('No active session');
+          if (mounted) {
+            setUser(null);
+            setProfile(null);
           }
         }
       } catch (err) {
         console.error('Error initializing auth:', err);
-        if (mounted) setError(err.message);
+        if (mounted) {
+          setError(err.message);
+        }
       } finally {
-        // 2. CRÍTICO: Pase lo que pase, dejamos de cargar
+        // SIEMPRE setear loading a false
         if (mounted) {
           setLoading(false);
         }
@@ -98,43 +158,68 @@ export const AuthProvider = ({ children }) => {
 
     initAuth();
 
-    // 3. Escuchar cambios de estado
+    // Escuchar cambios de autenticación
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
+        console.log('Auth state change:', event, session?.user?.email);
+
+        // Ignorar eventos si el componente está desmontado
         if (!mounted) return;
 
-        console.log('Auth event:', event);
+        switch (event) {
+          case 'SIGNED_IN':
+            if (session?.user) {
+              setUser(session.user);
+              // No bloquear - cargar perfil en background
+              loadProfile(session.user.id);
+              if (session.provider_token) {
+                saveGoogleTokens(session);
+              }
+            }
+            break;
 
-        if (event === 'SIGNED_IN' && session?.user) {
-          setUser(session.user);
-          setLoading(false); // Asegurar que deje de cargar
-          await loadProfile(session.user.id);
+          case 'SIGNED_OUT':
+            setUser(null);
+            setProfile(null);
+            break;
 
-          if (session.provider_token) {
-            await saveGoogleTokens(session);
-          }
-        } else if (event === 'SIGNED_OUT') {
-          setUser(null);
-          setProfile(null);
-          setLoading(false);
-        } else if (event === 'TOKEN_REFRESHED' && session) {
-          setUser(session.user);
-          // Actualizar tokens silenciosamente
-          if (session.provider_token) {
-            saveGoogleTokens(session);
-          }
+          case 'TOKEN_REFRESHED':
+            if (session?.user) {
+              setUser(session.user);
+              if (session.provider_token) {
+                saveGoogleTokens(session);
+              }
+            }
+            break;
+
+          case 'USER_UPDATED':
+            if (session?.user) {
+              setUser(session.user);
+              loadProfile(session.user.id);
+            }
+            break;
+
+          default:
+            // Otros eventos (INITIAL_SESSION, etc.) - no hacer nada especial
+            break;
         }
       }
     );
 
+    authSubscription = subscription;
+
     return () => {
       mounted = false;
-      subscription.unsubscribe();
+      if (authSubscription) {
+        authSubscription.unsubscribe();
+      }
     };
-  }, []);
+  }, [loadProfile, saveGoogleTokens]);
 
+  // Login con Google
   const signInWithGoogle = async () => {
     setError(null);
+
     const { data, error: signInError } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
@@ -151,24 +236,36 @@ export const AuthProvider = ({ children }) => {
       setError(signInError.message);
       throw signInError;
     }
+
     return data;
   };
 
+  // Logout
   const signOut = async () => {
-    const { error: signOutError } = await supabase.auth.signOut();
-    if (signOutError) {
-      setError(signOutError.message);
-      throw signOutError;
+    try {
+      const { error: signOutError } = await supabase.auth.signOut();
+      if (signOutError) {
+        console.error('Sign out error:', signOutError);
+      }
+    } catch (err) {
+      console.error('Unexpected sign out error:', err);
+    } finally {
+      // Siempre limpiar el estado local
+      setUser(null);
+      setProfile(null);
     }
-    setUser(null);
-    setProfile(null);
   };
 
+  // Actualizar perfil
   const updateProfile = async (updates) => {
     if (!user?.id) return null;
+
     const { data, error: updateError } = await supabase
       .from('user_profiles')
-      .update({ ...updates, updated_at: new Date().toISOString() })
+      .update({
+        ...updates,
+        updated_at: new Date().toISOString()
+      })
       .eq('id', user.id)
       .select()
       .single();
@@ -178,29 +275,29 @@ export const AuthProvider = ({ children }) => {
     return data;
   };
 
+  // Obtener token de Google válido
   const getGoogleAccessToken = async () => {
     if (!profile?.google_access_token) {
-      // Si no hay perfil cargado, intentamos usar la sesión actual como fallback
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.provider_token) return session.provider_token;
-
-      throw new Error('No hay token de Google disponible.');
+      throw new Error('No hay token de Google. Por favor, vuelve a iniciar sesión.');
     }
 
-    // Lógica simple de expiración
     if (profile.google_token_expires_at) {
       const expiresAt = new Date(profile.google_token_expires_at);
       const now = new Date();
-      // Si expira en menos de 5 min, refrescar
+
+      // Si expira en menos de 5 minutos, refrescar sesión
       if (expiresAt.getTime() - now.getTime() < 5 * 60 * 1000) {
         const { data: { session }, error: refreshError } = await supabase.auth.refreshSession();
+
         if (refreshError || !session?.provider_token) {
-          throw new Error('No se pudo refrescar el token.');
+          throw new Error('No se pudo refrescar el token. Por favor, vuelve a iniciar sesión.');
         }
+
         await saveGoogleTokens(session);
         return session.provider_token;
       }
     }
+
     return profile.google_access_token;
   };
 
@@ -214,7 +311,7 @@ export const AuthProvider = ({ children }) => {
     signOut,
     updateProfile,
     getGoogleAccessToken,
-    refreshProfile: () => user?.id && loadProfile(user.id)
+    refreshProfile: () => user?.id ? loadProfile(user.id) : Promise.resolve(null)
   };
 
   return (
