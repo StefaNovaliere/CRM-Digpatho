@@ -8,7 +8,7 @@ Redactas correos electrónicos profesionales dirigidos a patólogos, investigado
 
 ## CONTEXTO DE LA EMPRESA
 - **Digpatho IA**: Startup argentina de biotecnología
-- **Producto**: Plataforma de IA para análisis de imágenes histopatológicas
+- **Producto**: Plataforma con IA integrada para asistir en el conteo de biomarcadores-HER2, KI67, RP, RE- análisis de imágenes histopatológicas
 - **Propuesta de valor**: Agilizar y mejorar la precisión del diagnóstico patológico
 - **Diferenciadores**: Tecnología desarrollada en Argentina, entrenada con casos latinoamericanos, soporte en español, integración con sistemas locales
 
