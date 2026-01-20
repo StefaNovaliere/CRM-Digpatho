@@ -3,26 +3,115 @@ import { useState } from 'react';
 import { useAuth } from './useAuth';
 import { supabase } from '../lib/supabase';
 
-// ========================================
-// GMAIL API HOOK
-// ========================================
+// Google OAuth Token Endpoint
+const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+
 export const useGmail = () => {
-  const { user, profile, getGoogleAccessToken } = useAuth();
+  const { user, profile, refreshProfile } = useAuth();
   const [sending, setSending] = useState(false);
   const [error, setError] = useState(null);
 
   /**
+   * Obtiene un access token válido, refrescándolo si es necesario
+   */
+  const getValidAccessToken = async () => {
+    if (!profile) {
+      throw new Error('No hay perfil de usuario. Por favor, vuelve a iniciar sesión.');
+    }
+
+    // Verificar si el token actual sigue siendo válido
+    if (profile.google_access_token && profile.google_token_expires_at) {
+      const expiresAt = new Date(profile.google_token_expires_at);
+      const now = new Date();
+
+      // Si el token expira en más de 5 minutos, usarlo
+      if (expiresAt.getTime() - now.getTime() > 5 * 60 * 1000) {
+        console.log('Token válido, usando existente');
+        return profile.google_access_token;
+      }
+    }
+
+    // Token expirado o por expirar - necesitamos refrescarlo
+    if (!profile.google_refresh_token) {
+      throw new Error('No hay refresh token. Por favor, cierra sesión y vuelve a iniciar sesión con Google.');
+    }
+
+    console.log('Token expirado, refrescando...');
+
+    try {
+      // Obtener Client ID y Secret de las variables de entorno
+      const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+      const clientSecret = import.meta.env.VITE_GOOGLE_CLIENT_SECRET;
+
+      if (!clientId || !clientSecret) {
+        console.error('Faltan VITE_GOOGLE_CLIENT_ID o VITE_GOOGLE_CLIENT_SECRET');
+        throw new Error('Configuración de Google incompleta. Contacta al administrador.');
+      }
+
+      // Llamar a Google directamente para refrescar el token
+      const response = await fetch(GOOGLE_TOKEN_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          client_id: clientId,
+          client_secret: clientSecret,
+          refresh_token: profile.google_refresh_token,
+          grant_type: 'refresh_token',
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('Error refreshing token:', errorData);
+        throw new Error('No se pudo refrescar el token. Por favor, vuelve a iniciar sesión.');
+      }
+
+      const data = await response.json();
+
+      // Calcular nueva fecha de expiración
+      const expiresAt = new Date();
+      expiresAt.setSeconds(expiresAt.getSeconds() + (data.expires_in || 3600));
+
+      // Guardar el nuevo token en la base de datos
+      const { error: updateError } = await supabase
+        .from('user_profiles')
+        .update({
+          google_access_token: data.access_token,
+          google_token_expires_at: expiresAt.toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', user.id);
+
+      if (updateError) {
+        console.error('Error saving new token:', updateError);
+      }
+
+      // Refrescar el perfil en memoria
+      if (refreshProfile) {
+        await refreshProfile();
+      }
+
+      console.log('Token refrescado exitosamente');
+      return data.access_token;
+
+    } catch (err) {
+      console.error('Error en refresh:', err);
+      throw new Error('No se pudo refrescar el token. Por favor, vuelve a iniciar sesión.');
+    }
+  };
+
+  /**
    * Envía un email usando Gmail API
-   * @param {object} options - { to, subject, body, draftId? }
-   * @returns {object} - { success, messageId, error }
    */
   const sendEmail = async ({ to, subject, body, draftId = null }) => {
     setSending(true);
     setError(null);
 
     try {
-      // 1. Obtener token válido
-      const accessToken = await getGoogleAccessToken();
+      // 1. Obtener token válido (refresca automáticamente si es necesario)
+      const accessToken = await getValidAccessToken();
 
       // 2. Construir el email en formato RFC 2822
       const fromEmail = user?.email || profile?.email;
@@ -68,6 +157,7 @@ export const useGmail = () => {
 
       if (!response.ok) {
         const errorData = await response.json();
+        console.error('Gmail API error:', errorData);
         throw new Error(errorData.error?.message || 'Error al enviar email');
       }
 
