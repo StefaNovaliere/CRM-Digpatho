@@ -1,34 +1,32 @@
 // src/hooks/useEmailGeneration.js
 import { useState } from 'react';
 import { supabase } from '../lib/supabase';
+// IMPORTAMOS LA CONFIGURACIÓN AVANZADA
+import { EMAIL_AGENT_SYSTEM_PROMPT, buildEmailGenerationPrompt } from '../config/aiPrompts';
 
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 
 // ========================================
-// SYSTEM PROMPTS POR TONO
+// AJUSTES DE TONO (Overrides sobre el Prompt Base)
 // ========================================
-const TONE_PROMPTS = {
-  professional: `Eres un experto en comunicación empresarial B2B para el sector de salud y patología.
-Tu tono es profesional, respetuoso y orientado a resultados.
-Usas lenguaje formal pero no frío. Eres directo pero cortés.`,
+const TONE_ADJUSTMENTS = {
+  professional: `
+AJUSTE DE TONO: PROFESIONAL
+- Mantén un lenguaje formal y respetuoso.
+- Enfócate en la eficiencia y resultados clínicos.
+- Evita excesiva familiaridad.`,
 
-  empathetic: `Eres un experto en comunicación empresarial B2B para el sector de salud y patología.
-Tu tono es cálido, empático y comprensivo. Te preocupas genuinamente por los desafíos del profesional.
-Construyes rapport antes de ir al punto. Muestras interés genuino en su trabajo.`,
+  empathetic: `
+AJUSTE DE TONO: EMPÁTICO
+- Usa un lenguaje cálido y comprensivo.
+- Muestra preocupación genuina por la carga de trabajo del patólogo.
+- Prioriza construir rapport humano antes de hablar de negocios.`,
 
-  direct: `Eres un experto en comunicación empresarial B2B para el sector de salud y patología.
-Tu tono es directo, conciso y eficiente. Vas al grano rápidamente.
-Respetas el tiempo del lector. Emails cortos y con propósito claro.`
-};
-
-// ========================================
-// INSTRUCCIONES POR TIPO DE EMAIL
-// ========================================
-const EMAIL_TYPE_INSTRUCTIONS = {
-  'follow-up': 'Genera un email de seguimiento natural que retome la conversación previa.',
-  'first-contact': 'Genera un email de primer contacto profesional para presentar Digpatho IA.',
-  'post-meeting': 'Genera un email de resumen post-reunión con próximos pasos claros.',
-  'reactivation': 'Genera un email para reactivar un contacto con el que hemos perdido comunicación.'
+  direct: `
+AJUSTE DE TONO: DIRECTO
+- Ve directo al grano.
+- Usa oraciones cortas y párrafos breves.
+- Elimina introducciones largas o adornos innecesarios.`
 };
 
 // ========================================
@@ -41,9 +39,6 @@ export const useEmailGeneration = () => {
 
   /**
    * Genera un email personalizado
-   * @param {string} contactId - ID del contacto
-   * @param {string} emailType - Tipo de email (follow-up, first-contact, etc)
-   * @param {object} config - Configuración contextual { tone, language }
    */
   const generateEmail = async (contactId, emailType = 'follow-up', config = {}) => {
     const { tone = 'professional', language = 'es' } = config;
@@ -56,10 +51,7 @@ export const useEmailGeneration = () => {
       // 1. Obtener datos completos del contacto
       const { data: contact, error: contactError } = await supabase
         .from('contacts')
-        .select(`
-          *,
-          institution:institutions(*)
-        `)
+        .select(`*, institution:institutions(*)`)
         .eq('id', contactId)
         .single();
 
@@ -73,11 +65,12 @@ export const useEmailGeneration = () => {
         .order('occurred_at', { ascending: false })
         .limit(5);
 
-      // 3. Construir el system prompt con el tono elegido
-      const systemPrompt = buildSystemPrompt(tone, language);
+      // 3. Construir el System Prompt COMBINADO
+      // Usamos el prompt base de aiPrompts.js + el ajuste de tono + idioma
+      const systemPrompt = buildCombinedSystemPrompt(tone, language);
 
-      // 4. Construir el user prompt con contexto
-      const userPrompt = buildUserPrompt(contact, interactions || [], emailType, language);
+      // 4. Construir el User Prompt (usando la función avanzada de aiPrompts.js)
+      const userPrompt = buildEmailGenerationPrompt(contact, interactions || [], emailType);
 
       // 5. Llamar a la API de Claude
       const response = await fetch(ANTHROPIC_API_URL, {
@@ -89,7 +82,7 @@ export const useEmailGeneration = () => {
           'anthropic-dangerous-direct-browser-access': 'true'
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
+          model: 'claude-sonnet-4-20250514', // O el modelo que prefieras usar
           max_tokens: 1024,
           system: systemPrompt,
           messages: [
@@ -109,7 +102,7 @@ export const useEmailGeneration = () => {
       // 6. Parsear el resultado
       const parsed = parseEmailResponse(generatedText);
 
-      // 7. Guardar el borrador en la base de datos
+      // 7. Guardar borrador
       const { data: draft, error: draftError } = await supabase
         .from('email_drafts')
         .insert({
@@ -123,21 +116,15 @@ export const useEmailGeneration = () => {
             language: language,
             contact_snapshot: {
               name: `${contact.first_name} ${contact.last_name}`,
-              institution: contact.institution?.name,
-              interest_level: contact.interest_level
-            },
-            interactions_count: interactions?.length || 0
+              institution: contact.institution?.name
+            }
           },
-          ai_model: 'claude-sonnet-4-20250514',
-          prompt_tokens: data.usage?.input_tokens,
-          completion_tokens: data.usage?.output_tokens
+          ai_model: 'claude-sonnet-4-20250514'
         })
         .select()
         .single();
 
-      if (draftError) {
-        console.error('Error guardando borrador:', draftError);
-      }
+      if (draftError) console.error('Error guardando borrador:', draftError);
 
       const result = {
         id: draft?.id,
@@ -172,99 +159,40 @@ export const useEmailGeneration = () => {
       updates.edited_body = editedBody;
       updates.edited_at = new Date().toISOString();
     }
-
-    const { error } = await supabase
-      .from('email_drafts')
-      .update(updates)
-      .eq('id', draftId);
-
-    if (error) {
-      console.error('Error actualizando borrador:', error);
-    }
+    await supabase.from('email_drafts').update(updates).eq('id', draftId);
   };
 
-  return {
-    generateEmail,
-    isGenerating,
-    generatedDraft,
-    error,
-    clearDraft,
-    updateDraftStatus
-  };
+  return { generateEmail, isGenerating, generatedDraft, error, clearDraft, updateDraftStatus };
 };
 
 // ========================================
 // HELPERS
 // ========================================
 
-function buildSystemPrompt(tone, language) {
-  const toneInstructions = TONE_PROMPTS[tone] || TONE_PROMPTS.professional;
-
+function buildCombinedSystemPrompt(tone, language) {
   const languageInstructions = {
-    es: 'Escribe SIEMPRE en español.',
-    en: 'Write ALWAYS in English.',
-    pt: 'Escreva SEMPRE em português.'
+    es: 'IDIOMA: Escribe SIEMPRE en ESPAÑOL (neutro o rioplatense según contexto).',
+    en: 'LANGUAGE: Write ALWAYS in ENGLISH.',
+    pt: 'IDIOMA: Escreva SEMPRE em PORTUGUÊS.'
   };
 
-  return `${toneInstructions}
+  // Aquí ocurre la magia: Combinamos el prompt general de la empresa con el ajuste específico
+  return `${EMAIL_AGENT_SYSTEM_PROMPT}
 
+---
 ${languageInstructions[language] || languageInstructions.es}
 
-Trabajas para Digpatho IA, una startup que desarrolla soluciones de inteligencia artificial para anatomía patológica y diagnóstico digital.
+${TONE_ADJUSTMENTS[tone] || TONE_ADJUSTMENTS.professional}
 
-REGLAS:
-- Genera emails concisos (máximo 150 palabras)
-- Personaliza basándote en el contexto proporcionado
-- Incluye siempre un llamado a la acción claro
-- NO uses frases genéricas como "espero que estés bien"
-- Usa el nombre del contacto apropiadamente
-
-FORMATO DE RESPUESTA (obligatorio):
-**Asunto:** [asunto del email]
-
-**Cuerpo:**
-[contenido del email]
-
-**Notas internas:** [opcional: notas para el comercial sobre el email]`;
-}
-
-function buildUserPrompt(contact, interactions, emailType, language) {
-  const interactionsText = interactions.length > 0
-    ? interactions.map(i => `- ${i.type}: "${i.subject || 'Sin asunto'}" (${new Date(i.occurred_at).toLocaleDateString()})`).join('\n')
-    : 'Sin interacciones previas';
-
-  const typeInstruction = EMAIL_TYPE_INSTRUCTIONS[emailType] || EMAIL_TYPE_INSTRUCTIONS['follow-up'];
-
-  return `CONTACTO:
-- Nombre: ${contact.first_name} ${contact.last_name}
-- Cargo: ${contact.job_title || 'No especificado'}
-- Institución: ${contact.institution?.name || 'No especificada'}
-- Nivel de interés: ${contact.interest_level}
-- Contexto especial: ${contact.ai_context || 'Ninguno'}
-
-HISTORIAL DE INTERACCIONES:
-${interactionsText}
-
-INSTRUCCIÓN:
-${typeInstruction}
-
-Genera el email ahora.`;
+IMPORTANTE: Recuerda seguir estrictamente el formato de respuesta con **Asunto**, **Cuerpo** y **Notas internas**.`;
 }
 
 function parseEmailResponse(text) {
-  const result = {
-    subject: '',
-    body: '',
-    notes: ''
-  };
+  const result = { subject: '', body: '', notes: '' };
 
-  // Buscar el asunto
   const subjectMatch = text.match(/\*\*Asunto:\*\*\s*(.+?)(?=\n|$)/i);
-  if (subjectMatch) {
-    result.subject = subjectMatch[1].trim();
-  }
+  if (subjectMatch) result.subject = subjectMatch[1].trim();
 
-  // Buscar el cuerpo
   const bodyMatch = text.match(/\*\*Cuerpo:\*\*\s*([\s\S]*?)(?=\*\*Notas internas:\*\*|$)/i);
   if (bodyMatch) {
     result.body = bodyMatch[1].trim();
@@ -272,11 +200,8 @@ function parseEmailResponse(text) {
     result.body = text.replace(/\*\*Asunto:\*\*.*\n?/i, '').trim();
   }
 
-  // Buscar notas internas
   const notesMatch = text.match(/\*\*Notas internas:\*\*\s*([\s\S]*?)$/i);
-  if (notesMatch) {
-    result.notes = notesMatch[1].trim();
-  }
+  if (notesMatch) result.notes = notesMatch[1].trim();
 
   return result;
 }
