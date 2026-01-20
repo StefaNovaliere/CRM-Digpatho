@@ -1,5 +1,4 @@
-// src/components/email/EmailDraftModal.jsx
-import { useState } from 'react';
+import { useState, useEffect } from 'react'; // 1. Importar useEffect
 import {
   X,
   Send,
@@ -21,32 +20,42 @@ export const EmailDraftModal = ({ isOpen, onClose, contact, draft, isLoading }) 
   const { updateDraftStatus } = useEmailGeneration();
 
   const [isEditing, setIsEditing] = useState(false);
+
+  // 2. Inicializar el estado directamente (evita que se pierda al dejar de editar)
   const [editedSubject, setEditedSubject] = useState('');
   const [editedBody, setEditedBody] = useState('');
+
   const [copied, setCopied] = useState(false);
   const [sendResult, setSendResult] = useState(null);
 
-  // Inicializar valores editables
-  const subject = isEditing ? editedSubject : (draft?.subject || '');
-  const body = isEditing ? editedBody : (draft?.body || '');
+  // 3. Sincronizar el estado cuando llega el borrador nuevo (draft)
+  useEffect(() => {
+    if (draft) {
+      setEditedSubject(draft.subject || '');
+      setEditedBody(draft.body || '');
+    }
+  }, [draft]);
+
+  // ELIMINADO: const subject = ... (Ya no usamos variables derivadas)
+  // ELIMINADO: const body = ...
 
   const handleStartEdit = () => {
-    setEditedSubject(draft?.subject || '');
-    setEditedBody(draft?.body || '');
+    // Ya no necesitamos resetear los valores aquí porque el estado ya los tiene
     setIsEditing(true);
   };
 
   const handleSaveEdit = async () => {
     if (draft?.id) {
+      // IMPORTANTE: Asegúrate de que tu función updateDraftStatus soporte guardar cambios
       await updateDraftStatus(draft.id, 'edited', editedBody);
     }
-    setIsEditing(false);
+    setIsEditing(false); // Al cerrar, ahora se seguirá viendo lo editado
   };
 
   const handleCopy = async () => {
     const success = await copyToClipboard({
-      subject: isEditing ? editedSubject : draft?.subject,
-      body: isEditing ? editedBody : draft?.body
+      subject: editedSubject, // Usar siempre el estado actual
+      body: editedBody
     });
     if (success) {
       setCopied(true);
@@ -59,15 +68,14 @@ export const EmailDraftModal = ({ isOpen, onClose, contact, draft, isLoading }) 
 
     const result = await sendEmail({
       to: contact.email,
-      subject: isEditing ? editedSubject : draft?.subject,
-      body: isEditing ? editedBody : draft?.body,
+      subject: editedSubject, // Usar siempre lo que está en pantalla (editado)
+      body: editedBody,       // Usar siempre lo que está en pantalla (editado)
       draftId: draft?.id
     });
 
     setSendResult(result);
 
     if (result.success) {
-      // Cerrar modal después de 2 segundos si el envío fue exitoso
       setTimeout(() => {
         onClose();
       }, 2000);
@@ -77,8 +85,8 @@ export const EmailDraftModal = ({ isOpen, onClose, contact, draft, isLoading }) 
   const handleOpenGmail = () => {
     openInGmail({
       to: contact.email,
-      subject: isEditing ? editedSubject : draft?.subject,
-      body: isEditing ? editedBody : draft?.body
+      subject: editedSubject,
+      body: editedBody
     });
   };
 
@@ -86,10 +94,8 @@ export const EmailDraftModal = ({ isOpen, onClose, contact, draft, isLoading }) 
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto">
-      {/* Backdrop */}
       <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
 
-      {/* Modal */}
       <div className="relative flex items-center justify-center min-h-screen p-4">
         <div className="relative w-full max-w-2xl bg-white rounded-2xl shadow-2xl overflow-hidden animate-scale-in">
           {/* Header */}
@@ -142,7 +148,7 @@ export const EmailDraftModal = ({ isOpen, onClose, contact, draft, isLoading }) 
                     />
                   ) : (
                     <div className="p-3 bg-gray-50 rounded-xl text-gray-900">
-                      {subject}
+                      {editedSubject} {/* Cambio aquí: mostrar siempre editedSubject */}
                     </div>
                   )}
                 </div>
@@ -161,7 +167,7 @@ export const EmailDraftModal = ({ isOpen, onClose, contact, draft, isLoading }) 
                     />
                   ) : (
                     <div className="p-4 bg-gray-50 rounded-xl text-gray-900 whitespace-pre-wrap max-h-64 overflow-y-auto">
-                      {body}
+                      {editedBody} {/* Cambio aquí: mostrar siempre editedBody */}
                     </div>
                   )}
                 </div>
@@ -248,7 +254,6 @@ export const EmailDraftModal = ({ isOpen, onClose, contact, draft, isLoading }) 
               </div>
 
               <div className="flex items-center gap-2">
-                {/* Open in Gmail - Fallback */}
                 <button
                   onClick={handleOpenGmail}
                   className="btn-secondary text-sm"
@@ -258,7 +263,6 @@ export const EmailDraftModal = ({ isOpen, onClose, contact, draft, isLoading }) 
                   Abrir en Gmail
                 </button>
 
-                {/* Send via API */}
                 {hasGmailAccess && contact?.email && (
                   <button
                     onClick={handleSendEmail}
