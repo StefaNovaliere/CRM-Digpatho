@@ -21,12 +21,14 @@ import {
   ChevronDown,
   Globe,
   MessageCircle,
-  Zap
+  Zap,
+  RefreshCw // Icono para indicar sincronización
 } from 'lucide-react';
 import { formatDistanceToNow, format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { supabase } from '../lib/supabase';
 import { useEmailGeneration } from '../hooks/useEmailGeneration';
+import { useGmail } from '../hooks/useGmail'; // Importamos el hook actualizado
 import { EmailDraftModal } from '../components/email/EmailDraftModal';
 import { ContactForm } from '../components/contacts/ContactForm';
 import { AddInteractionModal } from '../components/interactions/AddInteractionModal';
@@ -79,6 +81,7 @@ const InterestBadge = ({ level }) => {
 const TimelineItem = ({ interaction }) => {
   const iconMap = {
     email_sent: { icon: Send, color: 'bg-blue-100 text-blue-600' },
+    email_reply: { icon: Mail, color: 'bg-green-100 text-green-600' }, // Nuevo tipo para respuestas
     email_received: { icon: Mail, color: 'bg-green-100 text-green-600' },
     meeting: { icon: Video, color: 'bg-violet-100 text-violet-600' },
     call: { icon: Phone, color: 'bg-amber-100 text-amber-600' },
@@ -89,6 +92,10 @@ const TimelineItem = ({ interaction }) => {
   };
 
   const { icon: Icon, color } = iconMap[interaction.type] || iconMap.note;
+
+  // Formato para mostrar respuesta o contenido normal
+  const isReply = interaction.type === 'email_reply';
+  const displaySubject = isReply ? 'Respuesta Recibida' : (interaction.subject || interaction.type);
 
   return (
     <div className="flex gap-4">
@@ -101,7 +108,7 @@ const TimelineItem = ({ interaction }) => {
       <div className="flex-1 pb-8">
         <div className="flex items-start justify-between">
           <div>
-            <p className="font-medium text-gray-900">{interaction.subject || interaction.type}</p>
+            <p className="font-medium text-gray-900">{displaySubject}</p>
             <p className="text-sm text-gray-500 mt-0.5">
               {format(new Date(interaction.occurred_at), "d 'de' MMMM, yyyy 'a las' HH:mm", { locale: es })}
             </p>
@@ -132,28 +139,41 @@ export const ContactDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
 
+  // Hooks
+  const { generateEmail, isGenerating, generatedDraft, clearDraft } = useEmailGeneration();
+  const { checkContactReplies, syncing } = useGmail(); // Hook de Gmail para sincronización
+
+  // Estados
   const [contact, setContact] = useState(null);
   const [interactions, setInteractions] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // Modales
   const [showEditModal, setShowEditModal] = useState(false);
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [showInteractionModal, setShowInteractionModal] = useState(false);
 
-  // ========================================
-  // CONFIGURACIÓN CONTEXTUAL DEL EMAIL (NUEVO)
-  // ========================================
+  // Configuración de Email
   const [emailConfig, setEmailConfig] = useState({
     tone: 'professional',
     language: 'es',
     emailType: 'follow-up'
   });
-  const [showEmailConfig, setShowEmailConfig] = useState(false);
 
-  const { generateEmail, isGenerating, generatedDraft, clearDraft } = useEmailGeneration();
+  // No usamos showEmailConfig ya que el panel está siempre visible en desktop
+  // const [showEmailConfig, setShowEmailConfig] = useState(false);
 
   useEffect(() => {
     loadContact();
     loadInteractions();
+
+    // Sincronizar correos al entrar al perfil
+    if (id) {
+      checkContactReplies(id).then(() => {
+        // Recargar interacciones después de sincronizar por si hubo respuestas nuevas
+        loadInteractions();
+      });
+    }
   }, [id]);
 
   const loadContact = async () => {
@@ -185,9 +205,6 @@ export const ContactDetail = () => {
     setInteractions(data || []);
   };
 
-  // ========================================
-  // GENERAR EMAIL CON CONFIGURACIÓN CONTEXTUAL
-  // ========================================
   const handleGenerateEmail = async () => {
     // Pasar la configuración contextual al generador
     await generateEmail(id, emailConfig.emailType, {
@@ -195,7 +212,6 @@ export const ContactDetail = () => {
       language: emailConfig.language
     });
     setShowEmailModal(true);
-    setShowEmailConfig(false);
   };
 
   const handleDelete = async () => {
@@ -330,9 +346,17 @@ export const ContactDetail = () => {
               <div className="flex items-center gap-2">
                 <MessageSquare size={20} className="text-gray-400" />
                 <h2 className="font-semibold text-gray-900">Historial de Interacciones</h2>
-                <span className="px-2 py-0.5 bg-gray-100 text-gray-600 text-xs font-medium rounded-full">
-                  {interactions.length}
-                </span>
+                {/* Indicador de Sincronización */}
+                {syncing ? (
+                  <span className="flex items-center gap-1.5 px-2 py-1 bg-blue-50 text-blue-600 text-xs font-medium rounded-lg">
+                    <RefreshCw className="w-3 h-3 animate-spin" />
+                    Sincronizando Gmail...
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 bg-gray-100 text-gray-600 text-xs font-medium rounded-full">
+                    {interactions.length}
+                  </span>
+                )}
               </div>
               <button
                 onClick={() => setShowInteractionModal(true)}
@@ -366,7 +390,7 @@ export const ContactDetail = () => {
         </div>
 
         {/* ========================================
-            SIDEBAR CON GENERADOR DE EMAIL MEJORADO
+            SIDEBAR CON GENERADOR DE EMAIL
             ======================================== */}
         <div className="space-y-6">
           {/* AI Email Generator Card */}
