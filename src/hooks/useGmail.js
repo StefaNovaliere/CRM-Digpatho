@@ -188,39 +188,44 @@ export const useGmail = () => {
         if (threadData.messages && threadData.messages.length > 0) {
           for (const msg of threadData.messages) {
             // Solo nos interesan los mensajes RECIBIDOS (INBOX) que no tengamos ya
-            // Verificamos si ya existe en Supabase
+
+            // --- CORRECCIÓN AQUÍ: Usamos maybeSingle() para evitar el error 406 ---
             const { data: existing } = await supabase
               .from('interactions')
               .select('id')
               .eq('gmail_id', msg.id)
-              .single();
+              .maybeSingle();
 
             if (!existing) {
-              // Es un mensaje NUEVO. Determinar si es entrante o saliente
-              // (Normalmente labelIds incluye 'SENT' si es nuestro, 'INBOX' si es de ellos)
+              // Es un mensaje NUEVO.
               const isInbound = !msg.labelIds.includes('SENT');
 
               if (isInbound) {
-                // Decodificar el cuerpo (es complejo en Gmail API)
-                const snippet = msg.snippet; // Usamos el snippet para simplificar por ahora
-                // Obtener fecha
+                const snippet = msg.snippet;
+                // Parsear fecha
                 const dateHeader = msg.payload.headers.find(h => h.name === 'Date');
                 const msgDate = dateHeader ? new Date(dateHeader.value) : new Date();
 
                 // Insertar respuesta en el CRM
-                await supabase.from('interactions').insert({
+                // Asegúrate que 'email_draft_id' no se envía o es null
+                const { error: insertError } = await supabase.from('interactions').insert({
                   contact_id: contactId,
-                  type: 'email_reply', // Nuevo tipo
+                  type: 'email_reply',
                   subject: 'Respuesta recibida (Gmail)',
-                  content: snippet, // O parsear el full body si se desea más complejidad
+                  content: snippet,
                   direction: 'inbound',
                   occurred_at: msgDate.toISOString(),
                   created_by: user.id,
                   thread_id: threadId,
                   gmail_id: msg.id
+                  // No enviamos email_draft_id
                 });
 
-                console.log('Nueva respuesta sincronizada:', snippet);
+                if (insertError) {
+                    console.error("Error guardando respuesta:", insertError);
+                } else {
+                    console.log('Nueva respuesta sincronizada:', snippet);
+                }
               }
             }
           }
