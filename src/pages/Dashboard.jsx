@@ -14,17 +14,164 @@ import {
   TrendingUp,
   Zap,
   Target,
-  Calendar
+  Calendar,
+  X,
+  Search,
+  ExternalLink
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
 
 // ========================================
-// STAT CARD COMPONENT
+// SENT EMAILS MODAL COMPONENT (NUEVO)
 // ========================================
-const StatCard = ({ icon: Icon, label, value, change, changeType, color, iconBg }) => (
-  <div className="card p-6 hover:shadow-card-hover transition-all duration-300">
+const SentEmailsModal = ({ isOpen, onClose }) => {
+  const [emails, setEmails] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (isOpen) {
+      fetchSentEmails();
+    }
+  }, [isOpen]);
+
+  const fetchSentEmails = async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('email_drafts')
+        .select(`
+          id,
+          subject,
+          body,
+          created_at,
+          contact:contacts (id, first_name, last_name, email, institution:institutions(name))
+        `)
+        .eq('status', 'sent')
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      if (error) throw error;
+      setEmails(data || []);
+    } catch (error) {
+      console.error('Error fetching sent emails:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto">
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative flex items-center justify-center min-h-screen p-4">
+        <div className="relative w-full max-w-4xl bg-white rounded-2xl shadow-2xl overflow-hidden animate-scale-in">
+
+          {/* Header */}
+          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-gray-50">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-emerald-100 rounded-lg">
+                <Mail className="w-5 h-5 text-emerald-600" />
+              </div>
+              <div>
+                <h2 className="font-semibold text-gray-900">Historial de Emails Enviados</h2>
+                <p className="text-sm text-gray-500">Últimos 50 correos generados y enviados</p>
+              </div>
+            </div>
+            <button onClick={onClose} className="p-2 hover:bg-gray-200 rounded-lg transition-colors">
+              <X className="w-5 h-5 text-gray-500" />
+            </button>
+          </div>
+
+          {/* List */}
+          <div className="overflow-y-auto max-h-[600px] p-0">
+            {loading ? (
+              <div className="flex flex-col items-center justify-center py-20">
+                <div className="w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mb-4" />
+                <p className="text-gray-500">Cargando historial...</p>
+              </div>
+            ) : emails.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-20 text-center px-4">
+                <Mail className="w-12 h-12 text-gray-300 mb-3" />
+                <p className="text-gray-900 font-medium">No hay emails enviados aún</p>
+                <p className="text-gray-500 text-sm max-w-sm mt-1">
+                  Los correos que envíes a través de la herramienta de IA aparecerán aquí.
+                </p>
+              </div>
+            ) : (
+              <table className="w-full text-left border-collapse">
+                <thead className="bg-gray-50 sticky top-0 z-10 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  <tr>
+                    <th className="px-6 py-3 border-b border-gray-200">Destinatario</th>
+                    <th className="px-6 py-3 border-b border-gray-200">Asunto</th>
+                    <th className="px-6 py-3 border-b border-gray-200">Enviado</th>
+                    <th className="px-6 py-3 border-b border-gray-200 text-right">Acción</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {emails.map((email) => (
+                    <tr key={email.id} className="hover:bg-gray-50 transition-colors group">
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-700 text-xs font-bold">
+                            {email.contact?.first_name?.[0]}{email.contact?.last_name?.[0]}
+                          </div>
+                          <div>
+                            <p className="font-medium text-gray-900 text-sm">
+                              {email.contact?.first_name} {email.contact?.last_name}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              {email.contact?.institution?.name || 'Sin institución'}
+                            </p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <p className="text-sm text-gray-900 font-medium truncate max-w-xs" title={email.subject}>
+                          {email.subject}
+                        </p>
+                        <p className="text-xs text-gray-500 truncate max-w-xs mt-0.5">
+                          {email.body?.substring(0, 50)}...
+                        </p>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center gap-1.5 text-xs text-gray-500">
+                          <Clock className="w-3.5 h-3.5" />
+                          {formatDistanceToNow(new Date(email.created_at), { locale: es, addSuffix: true })}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <Link
+                          to={`/contacts/${email.contact?.id}`}
+                          className="inline-flex items-center justify-center p-2 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                          title="Ver contacto"
+                          onClick={onClose}
+                        >
+                          <ArrowRight className="w-4 h-4" />
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ========================================
+// STAT CARD COMPONENT (ACTUALIZADO)
+// ========================================
+const StatCard = ({ icon: Icon, label, value, change, changeType, color, iconBg, onClick }) => (
+  <div
+    onClick={onClick}
+    className={`card p-6 hover:shadow-card-hover transition-all duration-300 ${onClick ? 'cursor-pointer active:scale-95 ring-2 ring-transparent hover:ring-primary-100' : ''}`}
+  >
     <div className="flex items-start justify-between">
       <div className="space-y-3">
         <p className="text-sm font-medium text-gray-500">{label}</p>
@@ -162,6 +309,9 @@ export const Dashboard = () => {
   const [pendingFollowups, setPendingFollowups] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // Nuevo estado para el modal de historial de emails
+  const [isEmailHistoryOpen, setIsEmailHistoryOpen] = useState(false);
+
   useEffect(() => {
     let mounted = true;
 
@@ -253,6 +403,12 @@ export const Dashboard = () => {
 
   return (
     <div className="space-y-8 animate-fade-in">
+      {/* Modal de Emails Enviados */}
+      <SentEmailsModal
+        isOpen={isEmailHistoryOpen}
+        onClose={() => setIsEmailHistoryOpen(false)}
+      />
+
       {/* Header */}
       <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -295,12 +451,14 @@ export const Dashboard = () => {
           color="text-blue-600"
           iconBg="bg-blue-100"
         />
+        {/* Card de Emails actualizada con evento onClick */}
         <StatCard
           icon={Mail}
           label="Emails Enviados"
           value={stats.emailsSent}
           color="text-emerald-600"
           iconBg="bg-emerald-100"
+          onClick={() => setIsEmailHistoryOpen(true)}
         />
       </div>
 
