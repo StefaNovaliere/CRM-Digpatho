@@ -1,20 +1,20 @@
 // src/components/layout/Header.jsx
 import { useState, useEffect, useRef } from 'react';
-import { Search, Bell, Settings, LogOut, ChevronDown, Mail, Check, X } from 'lucide-react';
+import { Search, Bell, Settings, LogOut, ChevronDown, Mail, Check, X, Loader2 } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../hooks/useAuth'; // <--- IMPORTANTE: Usamos el hook directo
 import { formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
 
-export const Header = ({ user }) => {
+export const Header = () => { // Ya no dependemos de props externos
   const navigate = useNavigate();
-  const [searchQuery, setSearchQuery] = useState('');
+  const { user, signOut } = useAuth(); // Obtenemos el usuario directamente aquí
 
-  // Estados de Menús
+  const [searchQuery, setSearchQuery] = useState('');
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
 
-  // Estados de Notificaciones
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const notificationRef = useRef(null);
@@ -23,49 +23,62 @@ export const Header = ({ user }) => {
   // LÓGICA DE NOTIFICACIONES
   // ==========================================
 
-  // 1. Cargar notificaciones iniciales
   const fetchNotifications = async () => {
-    if (!user) return;
+    if (!user?.id) {
+        console.log("Header: No hay usuario activo para cargar notificaciones.");
+        return;
+    }
 
-    const { data } = await supabase
+    console.log("Header: Cargando notificaciones para", user.id);
+
+    const { data, error } = await supabase
       .from('notifications')
       .select('*')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
       .limit(10);
 
-    if (data) {
-      setNotifications(data);
-      setUnreadCount(data.filter(n => !n.is_read).length);
+    if (error) {
+        console.error("Header: Error cargando notificaciones:", error);
+    } else {
+        console.log("Header: Notificaciones cargadas:", data.length);
+        setNotifications(data || []);
+        setUnreadCount((data || []).filter(n => !n.is_read).length);
     }
   };
 
   useEffect(() => {
+    // Cargar al inicio
     fetchNotifications();
 
-    // 2. Suscripción en Tiempo Real (Real-time)
+    if (!user?.id) return;
+
+    // Suscripción Real-time
     const subscription = supabase
-      .channel('header_notifications')
+      .channel('header_notifications_v2') // Cambié el nombre del canal por si acaso
       .on('postgres_changes', {
         event: 'INSERT',
         schema: 'public',
         table: 'notifications',
-        filter: `user_id=eq.${user?.id}`
+        filter: `user_id=eq.${user.id}`
       },
         (payload) => {
-          // Nueva notificación recibida
+          console.log("Header: ¡Nueva notificación en tiempo real!", payload.new);
+          // Agregar la nueva notificación al principio de la lista
           setNotifications(prev => [payload.new, ...prev]);
           setUnreadCount(prev => prev + 1);
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+         console.log("Header: Estado de suscripción Realtime:", status);
+      });
 
     return () => {
-      subscription.unsubscribe();
+      supabase.removeChannel(subscription);
     };
-  }, [user]);
+  }, [user?.id]); // Dependencia clave: user.id
 
-  // 3. Cerrar notificaciones al hacer clic fuera
+  // Cerrar al hacer clic fuera
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (notificationRef.current && !notificationRef.current.contains(event.target)) {
@@ -76,25 +89,28 @@ export const Header = ({ user }) => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // 4. Acciones
   const markAsRead = async (id) => {
-    await supabase.from('notifications').update({ is_read: true }).eq('id', id);
+    // Optimistic UI update (actualizar visualmente primero)
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
     setUnreadCount(prev => Math.max(0, prev - 1));
+
+    // Update en DB
+    await supabase.from('notifications').update({ is_read: true }).eq('id', id);
   };
 
   const markAllAsRead = async () => {
-    await supabase.from('notifications').update({ is_read: true }).eq('user_id', user.id).eq('is_read', false);
+    if (!user?.id) return;
     setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
     setUnreadCount(0);
+    await supabase.from('notifications').update({ is_read: true }).eq('user_id', user.id).eq('is_read', false);
   };
 
   // ==========================================
   // LÓGICA GENERAL
   // ==========================================
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
+  const handleLogoutAction = async () => {
+    await signOut();
     navigate('/login');
   };
 
@@ -112,7 +128,7 @@ export const Header = ({ user }) => {
         <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
         <input
           type="text"
-          placeholder="Buscar contactos, instituciones..."
+          placeholder="Buscar contactos..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:bg-white focus:border-blue-500 outline-none transition-colors"
@@ -149,7 +165,12 @@ export const Header = ({ user }) => {
               </div>
 
               <div className="max-h-[400px] overflow-y-auto">
-                {notifications.length === 0 ? (
+                {!user ? (
+                   <div className="p-8 text-center text-gray-400">
+                     <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2" />
+                     Cargando...
+                   </div>
+                ) : notifications.length === 0 ? (
                   <div className="p-8 text-center text-gray-500">
                     <Bell className="w-8 h-8 mx-auto mb-2 text-gray-300" />
                     <p className="text-sm">Sin notificaciones nuevas</p>
@@ -159,7 +180,7 @@ export const Header = ({ user }) => {
                     {notifications.map((notif) => (
                       <div
                         key={notif.id}
-                        className={`p-4 hover:bg-gray-50 transition-colors ${!notif.is_read ? 'bg-blue-50/40' : ''}`}
+                        className={`p-4 hover:bg-gray-50 transition-colors ${!notif.is_read ? 'bg-blue-50/30' : ''}`}
                       >
                         <div className="flex gap-3">
                           <div className={`mt-1 w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
@@ -251,7 +272,7 @@ export const Header = ({ user }) => {
                 <div className="my-1 border-t border-gray-100" />
 
                 <button
-                  onClick={handleLogout}
+                  onClick={handleLogoutAction}
                   className="w-full flex items-center gap-3 px-4 py-2 text-sm text-red-600 hover:bg-red-50"
                 >
                   <LogOut size={16} />
