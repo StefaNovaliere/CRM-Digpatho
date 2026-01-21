@@ -264,6 +264,15 @@ export const MainLayout = () => {
               {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
 
+            {/* Search */}
+            <form onSubmit={handleSearch} className="relative flex-1 max-w-md mx-4 lg:mx-0">
+              <Search className="absolute w-4 h-4 text-gray-400 -translate-y-1/2 left-3 top-1/2" />
+              <input
+
+                className="w-full py-2.5 pl-10 pr-4 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none transition-all"
+              />
+            </form>
+
             {/* Right Actions */}
             <div className="flex items-center gap-2">
               {/* Help */}
