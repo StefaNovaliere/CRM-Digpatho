@@ -158,7 +158,16 @@ export const useGmail = () => {
     setSyncing(true);
 
     try {
-      // 1. Obtener todos los thread_ids conocidos para este contacto
+      // 1. Obtener nombre del contacto (Para la notificación)
+      const { data: contact } = await supabase
+        .from('contacts')
+        .select('first_name, last_name')
+        .eq('id', contactId)
+        .single();
+
+      const contactName = contact ? `${contact.first_name} ${contact.last_name}` : 'Un contacto';
+
+      // 2. Obtener threads
       const { data: threads } = await supabase
         .from('interactions')
         .select('thread_id')
@@ -170,11 +179,10 @@ export const useGmail = () => {
         return;
       }
 
-      // Filtrar threads únicos
       const uniqueThreadIds = [...new Set(threads.map(t => t.thread_id))];
       const accessToken = await getValidAccessToken();
 
-      // 2. Revisar cada hilo en Gmail
+      // 3. Revisar cada hilo
       for (const threadId of uniqueThreadIds) {
         const response = await fetch(
           `https://gmail.googleapis.com/gmail/v1/users/me/threads/${threadId}`,
@@ -184,12 +192,10 @@ export const useGmail = () => {
         if (!response.ok) continue;
         const threadData = await response.json();
 
-        // 3. Procesar mensajes del hilo
         if (threadData.messages && threadData.messages.length > 0) {
           for (const msg of threadData.messages) {
-            // Solo nos interesan los mensajes RECIBIDOS (INBOX) que no tengamos ya
 
-            // --- CORRECCIÓN AQUÍ: Usamos maybeSingle() para evitar el error 406 ---
+            // Verificar si ya existe
             const { data: existing } = await supabase
               .from('interactions')
               .select('id')
@@ -197,17 +203,14 @@ export const useGmail = () => {
               .maybeSingle();
 
             if (!existing) {
-              // Es un mensaje NUEVO.
               const isInbound = !msg.labelIds.includes('SENT');
 
               if (isInbound) {
                 const snippet = msg.snippet;
-                // Parsear fecha
                 const dateHeader = msg.payload.headers.find(h => h.name === 'Date');
                 const msgDate = dateHeader ? new Date(dateHeader.value) : new Date();
 
-                // Insertar respuesta en el CRM
-                // Asegúrate que 'email_draft_id' no se envía o es null
+                // A) Guardar Interacción
                 const { error: insertError } = await supabase.from('interactions').insert({
                   contact_id: contactId,
                   type: 'email_reply',
@@ -218,13 +221,19 @@ export const useGmail = () => {
                   created_by: user.id,
                   thread_id: threadId,
                   gmail_id: msg.id
-                  // No enviamos email_draft_id
                 });
 
-                if (insertError) {
-                    console.error("Error guardando respuesta:", insertError);
-                } else {
-                    console.log('Nueva respuesta sincronizada:', snippet);
+                // B) SI SE GUARDÓ BIEN -> CREAR NOTIFICACIÓN 🔔
+                if (!insertError) {
+                  console.log('Creando notificación para:', contactName);
+                  await supabase.from('notifications').insert({
+                    user_id: user.id,
+                    type: 'email_reply',
+                    title: `Respuesta de ${contactName}`,
+                    message: snippet ? snippet.substring(0, 80) + '...' : 'Tienes un nuevo correo.',
+                    link: `/contacts/${contactId}`,
+                    is_read: false
+                  });
                 }
               }
             }

@@ -1,14 +1,97 @@
 // src/components/layout/Header.jsx
-import { useState } from 'react';
-import { Search, Bell, Settings, LogOut, User, ChevronDown } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect, useRef } from 'react';
+import { Search, Bell, Settings, LogOut, ChevronDown, Mail, Check, X } from 'lucide-react';
+import { useNavigate, Link } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
+import { formatDistanceToNow } from 'date-fns';
+import { es } from 'date-fns/locale';
 
 export const Header = ({ user }) => {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Estados de Menús
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
+
+  // Estados de Notificaciones
+  const [notifications, setNotifications] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const notificationRef = useRef(null);
+
+  // ==========================================
+  // LÓGICA DE NOTIFICACIONES
+  // ==========================================
+
+  // 1. Cargar notificaciones iniciales
+  const fetchNotifications = async () => {
+    if (!user) return;
+
+    const { data } = await supabase
+      .from('notifications')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(10);
+
+    if (data) {
+      setNotifications(data);
+      setUnreadCount(data.filter(n => !n.is_read).length);
+    }
+  };
+
+  useEffect(() => {
+    fetchNotifications();
+
+    // 2. Suscripción en Tiempo Real (Real-time)
+    const subscription = supabase
+      .channel('header_notifications')
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'notifications',
+        filter: `user_id=eq.${user?.id}`
+      },
+        (payload) => {
+          // Nueva notificación recibida
+          setNotifications(prev => [payload.new, ...prev]);
+          setUnreadCount(prev => prev + 1);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [user]);
+
+  // 3. Cerrar notificaciones al hacer clic fuera
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (notificationRef.current && !notificationRef.current.contains(event.target)) {
+        setShowNotifications(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // 4. Acciones
+  const markAsRead = async (id) => {
+    await supabase.from('notifications').update({ is_read: true }).eq('id', id);
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
+    setUnreadCount(prev => Math.max(0, prev - 1));
+  };
+
+  const markAllAsRead = async () => {
+    await supabase.from('notifications').update({ is_read: true }).eq('user_id', user.id).eq('is_read', false);
+    setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+    setUnreadCount(0);
+  };
+
+  // ==========================================
+  // LÓGICA GENERAL
+  // ==========================================
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -38,32 +121,101 @@ export const Header = ({ user }) => {
 
       {/* Right side */}
       <div className="flex items-center gap-3">
-        {/* Notifications */}
-        <div className="relative">
+
+        {/* ==================== NOTIFICATIONS ==================== */}
+        <div className="relative" ref={notificationRef}>
           <button
             onClick={() => setShowNotifications(!showNotifications)}
             className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors relative"
           >
             <Bell size={20} />
-            <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full" />
+            {unreadCount > 0 && (
+              <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white animate-pulse" />
+            )}
           </button>
 
           {showNotifications && (
-            <>
-              <div className="fixed inset-0 z-10" onClick={() => setShowNotifications(false)} />
-              <div className="absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-lg border border-gray-200 z-20">
-                <div className="p-4 border-b border-gray-100">
-                  <h3 className="font-semibold text-gray-900">Notificaciones</h3>
-                </div>
-                <div className="p-4 text-center text-sm text-gray-500">
-                  No tienes notificaciones nuevas
-                </div>
+            <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden z-20 animate-scale-in origin-top-right">
+              <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
+                <h3 className="font-semibold text-gray-900 text-sm">Notificaciones</h3>
+                {unreadCount > 0 && (
+                  <button
+                    onClick={markAllAsRead}
+                    className="text-xs font-medium text-primary-600 hover:text-primary-700 flex items-center gap-1"
+                  >
+                    <Check size={12} /> Marcar todo leído
+                  </button>
+                )}
               </div>
-            </>
+
+              <div className="max-h-[400px] overflow-y-auto">
+                {notifications.length === 0 ? (
+                  <div className="p-8 text-center text-gray-500">
+                    <Bell className="w-8 h-8 mx-auto mb-2 text-gray-300" />
+                    <p className="text-sm">Sin notificaciones nuevas</p>
+                  </div>
+                ) : (
+                  <div className="divide-y divide-gray-50">
+                    {notifications.map((notif) => (
+                      <div
+                        key={notif.id}
+                        className={`p-4 hover:bg-gray-50 transition-colors ${!notif.is_read ? 'bg-blue-50/40' : ''}`}
+                      >
+                        <div className="flex gap-3">
+                          <div className={`mt-1 w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
+                            notif.type === 'email_reply' ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-500'
+                          }`}>
+                            {notif.type === 'email_reply' ? <Mail size={14} /> : <Bell size={14} />}
+                          </div>
+
+                          <div className="flex-1 min-w-0">
+                            <div className="flex justify-between items-start">
+                              <p className={`text-sm font-medium truncate ${!notif.is_read ? 'text-gray-900' : 'text-gray-600'}`}>
+                                {notif.title}
+                              </p>
+                              <span className="text-[10px] text-gray-400 whitespace-nowrap ml-2 flex-shrink-0">
+                                {formatDistanceToNow(new Date(notif.created_at), { locale: es, addSuffix: true })}
+                              </span>
+                            </div>
+
+                            <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">
+                              {notif.message}
+                            </p>
+
+                            <div className="flex items-center gap-3 mt-2">
+                              {notif.link && (
+                                <Link
+                                  to={notif.link}
+                                  onClick={() => {
+                                    setShowNotifications(false);
+                                    markAsRead(notif.id);
+                                  }}
+                                  className="text-xs font-medium text-blue-600 hover:text-blue-700"
+                                >
+                                  Ver detalle
+                                </Link>
+                              )}
+                              {!notif.is_read && (
+                                <button
+                                  onClick={() => markAsRead(notif.id)}
+                                  className="text-xs text-gray-400 hover:text-gray-600"
+                                >
+                                  Marcar leído
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
           )}
         </div>
 
-        {/* User menu */}
+        {/* ==================== USER MENU ==================== */}
         <div className="relative">
           <button
             onClick={() => setShowUserMenu(!showUserMenu)}
