@@ -39,7 +39,7 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
   const [campaignName, setCampaignName] = useState('');
 
   // <--- NUEVO: Estado para CC (con valor por defecto)
-  const [ccEmails, setCcEmails] = useState('octavio.carranza@digpatho.com');
+  const [ccEmails, setCcEmails] = useState('octavio.carranza.torres@digpatho.com');
 
   const [file, setFile] = useState(null);
   const [fileData, setFileData] = useState([]);
