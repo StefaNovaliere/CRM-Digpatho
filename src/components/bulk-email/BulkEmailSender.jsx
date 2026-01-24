@@ -108,7 +108,7 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
     // Construir MIME
     const encodedSubject = `=?UTF-8?B?${btoa(unescape(encodeURIComponent(queueItem.subject)))}?=`;
 
-    // <--- NUEVO: Construcción dinámica de headers con CC
+    // Headers con soporte para CC
     const headers = [
       `From: "${fromName}" <${fromEmail}>`,
       `To: ${queueItem.to_email}`,
@@ -117,11 +117,10 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
       'Content-Type: text/plain; charset=UTF-8'
     ];
 
-    // Si la campaña tiene emails en CC, los agregamos
+    // Agregar CC si existe
     if (campaign.cc_emails && campaign.cc_emails.trim()) {
       headers.splice(2, 0, `Cc: ${campaign.cc_emails}`);
     }
-    // ----------------------------------------------------
 
     const emailContent = [
       ...headers,
@@ -236,20 +235,42 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
             })
             .eq('id', queueItem.id);
 
-          // Registrar interacción si hay contact_id
-          if (queueItem.contact_id) {
+          // =================================================================
+          // <--- CORRECCIÓN AQUÍ: Asegurar registro en el historial (Interactions)
+          // =================================================================
+
+          let targetContactId = queueItem.contact_id;
+
+          // Si el item de la cola no tiene ID (ej: importación suelta), buscamos al contacto por email
+          if (!targetContactId) {
+            const { data: foundContact } = await supabase
+              .from('contacts')
+              .select('id')
+              .eq('email', queueItem.to_email)
+              .maybeSingle();
+
+            if (foundContact) {
+              targetContactId = foundContact.id;
+            }
+          }
+
+          // Solo registramos la interacción si logramos vincular un contacto
+          if (targetContactId) {
             await supabase.from('interactions').insert({
-              contact_id: queueItem.contact_id,
-              type: 'email_sent',
+              contact_id: targetContactId,
+              type: 'email_sent', // Esto es lo que lee el historial
               subject: queueItem.subject,
               content: queueItem.body,
               direction: 'outbound',
               occurred_at: new Date().toISOString(),
               created_by: user.id,
               thread_id: result.threadId,
-              gmail_id: result.id
+              gmail_id: result.id,
+              // Opcional: metadata para saber que vino de una campaña masiva
+              // metadata: { campaign_id: campaign.id, campaign_name: campaign.name }
             });
           }
+          // =================================================================
 
           sentCount++;
           addLog(`✓ Enviado a ${queueItem.to_email}`, 'success');
