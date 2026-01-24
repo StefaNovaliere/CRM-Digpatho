@@ -13,6 +13,7 @@ import { Contacts } from './pages/Contacts';
 import { ContactDetail } from './pages/ContactDetail';
 import { Institutions } from './pages/Institutions';
 import { Settings } from './pages/Settings';
+import { BulkEmail } from './pages/BulkEmail'; // NUEVO
 
 function App() {
   return (
@@ -34,6 +35,7 @@ function App() {
           <Route path="/contacts/:id" element={<ContactDetail />} />
           <Route path="/institutions" element={<Institutions />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/bulk-email" element={<BulkEmail />} /> {/* NUEVO */}
         </Route>
 
         {/* Redirects */}
