@@ -18,7 +18,8 @@ import {
   User,
   Check,
   Mail,
-  Loader2
+  Loader2,
+  Send // <--- AGREGADO AQUÍ
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { supabase } from '../../lib/supabase';
@@ -138,6 +139,8 @@ export const MainLayout = () => {
     { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
     { to: '/contacts', icon: Users, label: 'Contactos' },
     { to: '/institutions', icon: Building2, label: 'Instituciones' },
+    // NUEVO LINK AGREGADO AQUÍ
+    { to: '/bulk-email', icon: Send, label: 'Envío Masivo' },
   ];
 
   const secondaryNav = [
