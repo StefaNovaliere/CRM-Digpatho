@@ -108,12 +108,23 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
     // Construir MIME
     const encodedSubject = `=?UTF-8?B?${btoa(unescape(encodeURIComponent(queueItem.subject)))}?=`;
 
-    const emailContent = [
+    // <--- NUEVO: Construcción dinámica de headers con CC
+    const headers = [
       `From: "${fromName}" <${fromEmail}>`,
       `To: ${queueItem.to_email}`,
       `Subject: ${encodedSubject}`,
       'MIME-Version: 1.0',
-      'Content-Type: text/plain; charset=UTF-8',
+      'Content-Type: text/plain; charset=UTF-8'
+    ];
+
+    // Si la campaña tiene emails en CC, los agregamos
+    if (campaign.cc_emails && campaign.cc_emails.trim()) {
+      headers.splice(2, 0, `Cc: ${campaign.cc_emails}`);
+    }
+    // ----------------------------------------------------
+
+    const emailContent = [
+      ...headers,
       '',
       fullBody
     ].join('\r\n');

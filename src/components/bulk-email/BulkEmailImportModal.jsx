@@ -37,6 +37,10 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
   const { user } = useAuth();
   const [step, setStep] = useState(1); // 1: Upload, 2: Map, 3: Preview, 4: Creating
   const [campaignName, setCampaignName] = useState('');
+
+  // <--- NUEVO: Estado para CC (con valor por defecto)
+  const [ccEmails, setCcEmails] = useState('octavio.carranza@digpatho.com');
+
   const [file, setFile] = useState(null);
   const [fileData, setFileData] = useState([]);
   const [fileColumns, setFileColumns] = useState([]);
@@ -190,6 +194,7 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
         .from('bulk_email_campaigns')
         .insert({
           name: campaignName.trim(),
+          cc_emails: ccEmails.trim(), // <--- NUEVO: Guardamos los CC
           status: 'ready',
           total_emails: fileData.length,
           created_by: user.id
@@ -201,7 +206,6 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
 
       // 2. Procesar cada fila
       const queueItems = [];
-      const contactsToCreate = [];
       const seenEmails = new Set();
 
       for (const row of fileData) {
@@ -366,10 +370,28 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
                     type="text"
                     value={campaignName}
                     onChange={(e) => setCampaignName(e.target.value)}
-                    className="input"
+                    className="input w-full px-3 py-2 border border-gray-300 rounded-lg"
                     placeholder="Ej: Campaña Pharma Q1 2026"
                   />
                 </div>
+
+                {/* <--- NUEVO: INPUT PARA CC EMAILS ---> */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    En copia a (CC)
+                  </label>
+                  <input
+                    type="text"
+                    value={ccEmails}
+                    onChange={(e) => setCcEmails(e.target.value)}
+                    className="input w-full px-3 py-2 border border-gray-300 rounded-lg"
+                    placeholder="octavio@ejemplo.com, otro@ejemplo.com"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Opcional. Separa múltiples correos con comas.
+                  </p>
+                </div>
+                {/* ------------------------------------- */}
 
                 {/* File Info */}
                 <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl">
@@ -466,6 +488,12 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
                 <div className="p-4 bg-green-50 border border-green-200 rounded-xl">
                   <p className="text-sm text-green-700">
                     <strong>Campaña:</strong> {campaignName} • <strong>{fileData.length}</strong> emails a enviar
+                    {/* <--- NUEVO: Mostrar aviso de CC en preview ---> */}
+                    {ccEmails && (
+                         <span className="block mt-1 text-xs">
+                           (Con copia a: {ccEmails})
+                         </span>
+                    )}
                   </p>
                 </div>
 
