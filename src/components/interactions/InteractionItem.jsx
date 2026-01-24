@@ -1,15 +1,17 @@
 // src/components/interactions/InteractionItem.jsx
 import {
   Send, Mail, Phone, Video, FileText, Calendar,
-  Linkedin, Sparkles, MoreVertical, Edit3, Trash2
+  Linkedin, Sparkles, MoreVertical, Edit3, Trash2,
+  ChevronDown, ChevronUp, Reply
 } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 
 const iconMap = {
   email_sent: { icon: Send, color: 'bg-blue-100 text-blue-600', label: 'Email Enviado' },
   email_received: { icon: Mail, color: 'bg-green-100 text-green-600', label: 'Email Recibido' },
+  email_reply: { icon: Reply, color: 'bg-emerald-100 text-emerald-600', label: 'Respuesta Recibida' },
   meeting: { icon: Video, color: 'bg-violet-100 text-violet-600', label: 'Reunión' },
   call: { icon: Phone, color: 'bg-amber-100 text-amber-600', label: 'Llamada' },
   demo: { icon: Sparkles, color: 'bg-pink-100 text-pink-600', label: 'Demo' },
@@ -17,6 +19,10 @@ const iconMap = {
   linkedin: { icon: Linkedin, color: 'bg-sky-100 text-sky-600', label: 'LinkedIn' },
   conference: { icon: Calendar, color: 'bg-indigo-100 text-indigo-600', label: 'Conferencia' }
 };
+
+// Configuración de truncado
+const MAX_LINES = 5;
+const MAX_CHARS = 400;
 
 export const InteractionItem = ({
   interaction,
@@ -26,6 +32,7 @@ export const InteractionItem = ({
   compact = false
 }) => {
   const [showMenu, setShowMenu] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
 
   const { icon: Icon, color, label } = iconMap[interaction.type] || iconMap.note;
 
@@ -40,6 +47,39 @@ export const InteractionItem = ({
     inbound: 'bg-green-50 text-green-700',
     internal: 'bg-gray-50 text-gray-600'
   };
+
+  // Calcular si el contenido necesita ser truncado
+  const { truncatedContent, needsTruncation } = useMemo(() => {
+    if (!interaction.content) {
+      return { truncatedContent: '', needsTruncation: false };
+    }
+
+    const content = interaction.content;
+    const lines = content.split('\n');
+
+    // Verificar si excede el límite de líneas o caracteres
+    const exceedsLines = lines.length > MAX_LINES;
+    const exceedsChars = content.length > MAX_CHARS;
+
+    if (!exceedsLines && !exceedsChars) {
+      return { truncatedContent: content, needsTruncation: false };
+    }
+
+    // Truncar por líneas primero
+    let truncated = lines.slice(0, MAX_LINES).join('\n');
+
+    // Si aún es muy largo, truncar por caracteres
+    if (truncated.length > MAX_CHARS) {
+      truncated = truncated.substring(0, MAX_CHARS);
+      // Cortar en el último espacio para no cortar palabras
+      const lastSpace = truncated.lastIndexOf(' ');
+      if (lastSpace > MAX_CHARS * 0.8) {
+        truncated = truncated.substring(0, lastSpace);
+      }
+    }
+
+    return { truncatedContent: truncated, needsTruncation: true };
+  }, [interaction.content]);
 
   if (compact) {
     return (
@@ -136,10 +176,39 @@ export const InteractionItem = ({
             )}
           </div>
 
-          {/* Content body */}
+          {/* Content body - AHORA CON TRUNCADO Y EXPANDIR */}
           {interaction.content && (
-            <div className="mt-3 p-4 bg-gray-50 rounded-lg text-sm text-gray-700 whitespace-pre-wrap">
-              {interaction.content}
+            <div className="mt-3">
+              <div className={`p-4 bg-gray-50 rounded-lg text-sm text-gray-700 whitespace-pre-wrap ${
+                !isExpanded && needsTruncation ? 'relative' : ''
+              }`}>
+                {isExpanded ? interaction.content : truncatedContent}
+
+                {/* Gradiente de fade cuando está truncado */}
+                {!isExpanded && needsTruncation && (
+                  <div className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-gray-50 to-transparent rounded-b-lg pointer-events-none" />
+                )}
+              </div>
+
+              {/* Botón Ver más / Ver menos */}
+              {needsTruncation && (
+                <button
+                  onClick={() => setIsExpanded(!isExpanded)}
+                  className="mt-2 flex items-center gap-1 text-sm font-medium text-primary-600 hover:text-primary-700 transition-colors"
+                >
+                  {isExpanded ? (
+                    <>
+                      <ChevronUp size={16} />
+                      Ver menos
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown size={16} />
+                      Ver más
+                    </>
+                  )}
+                </button>
+              )}
             </div>
           )}
 
@@ -162,4 +231,3 @@ export const InteractionItem = ({
 };
 
 export default InteractionItem;
-
