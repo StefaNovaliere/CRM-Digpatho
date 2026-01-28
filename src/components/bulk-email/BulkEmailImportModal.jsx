@@ -10,7 +10,8 @@ import {
   Loader2,
   Mail,
   Users,
-  Eye
+  Eye,
+  AlertTriangle
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../hooks/useAuth';
@@ -33,28 +34,68 @@ const OPTIONAL_CONTACT_FIELDS = [
   { key: 'ai_context', label: 'Contexto IA' },
 ];
 
+// Auto-mapeo EXPANDIDO con más variantes
+const AUTO_MAP_KEYWORDS = {
+  'email': ['email', 'correo', 'mail', 'e-mail', 'mail principal', 'email principal', 'mail address'],
+  'subject': ['asunto', 'subject', 'encabezado', 'titulo', 'encabezado email', 'asunto email', 'subject line'],
+  'body': ['cuerpo', 'body', 'mensaje', 'contenido', 'texto', 'cuerpo email', 'cuerpo del email', 'message', 'cuerpo del correo'],
+  'first_name': ['nombre', 'first name', 'first_name', 'nombres', 'name'],
+  'last_name': ['apellido', 'last name', 'last_name', 'apellidos', 'surname'],
+  'institution_name': ['institución', 'institucion', 'empresa', 'organización', 'organizacion', 'institution', 'company', 'hospital', 'centro'],
+  'phone': ['teléfono', 'telefono', 'phone', 'celular', 'móvil', 'movil', 'whatsapp', 'tel'],
+  'country': ['país', 'pais', 'country', 'region'],
+  'job_title': ['cargo', 'puesto', 'position', 'title', 'rol', 'role', 'job'],
+  'ai_context': ['contexto', 'notas', 'argumento', 'notes', 'context', 'tema', 'importancia'],
+};
+
 export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
   const { user } = useAuth();
-  const [step, setStep] = useState(1); // 1: Upload, 2: Map, 3: Preview, 4: Creating
+  const [step, setStep] = useState(1);
   const [campaignName, setCampaignName] = useState('');
-
-  // <--- NUEVO: Estado para CC (con valor por defecto)
-  const [ccEmails, setCcEmails] = useState('octavio.carranza.torres@digpatho.com');
-
   const [file, setFile] = useState(null);
   const [fileData, setFileData] = useState([]);
   const [fileColumns, setFileColumns] = useState([]);
   const [mapping, setMapping] = useState({});
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState(null);
+  const [warning, setWarning] = useState(null);
   const [previewEmail, setPreviewEmail] = useState(null);
 
-  // Leer archivo
+  // Detectar si una fila parece ser de headers (tiene texto, no datos)
+  const isHeaderRow = (row) => {
+    if (!row || row.length === 0) return false;
+    
+    // Contar cuántas celdas tienen valores que parecen headers
+    let headerLikeCount = 0;
+    let emptyCount = 0;
+    
+    for (const cell of row) {
+      const val = String(cell || '').trim().toLowerCase();
+      if (!val || val === 'nan' || val === 'undefined') {
+        emptyCount++;
+        continue;
+      }
+      // Verificar si parece un header (palabras comunes de headers)
+      const headerKeywords = ['nombre', 'email', 'mail', 'asunto', 'mensaje', 'telefono', 'pais', 'cargo', 
+                             'institucion', 'apellido', 'cuerpo', 'encabezado', 'linkedin', 'whatsapp',
+                             'name', 'subject', 'body', 'phone', 'country', 'title', 'message'];
+      if (headerKeywords.some(kw => val.includes(kw))) {
+        headerLikeCount++;
+      }
+    }
+    
+    // Si más del 30% de las celdas parecen headers, probablemente es una fila de headers
+    const nonEmptyCount = row.length - emptyCount;
+    return nonEmptyCount > 0 && (headerLikeCount / nonEmptyCount) > 0.3;
+  };
+
+  // Leer archivo con detección inteligente de headers
   const handleFileUpload = useCallback(async (e) => {
     const uploadedFile = e.target.files[0];
     if (!uploadedFile) return;
 
     setError(null);
+    setWarning(null);
     setFile(uploadedFile);
 
     try {
@@ -63,70 +104,128 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
         const data = new Uint8Array(e.target.result);
         const workbook = XLSX.read(data, { type: 'array' });
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
-        const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+        const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
 
         if (jsonData.length < 2) {
-          setError('El archivo está vacío o no tiene datos');
+          setError('El archivo está vacío o no tiene datos suficientes');
           return;
         }
 
-        const columns = jsonData[0].map(col => String(col || '').trim());
-        const rows = jsonData.slice(1).map(row => {
+        // DETECTAR FILA DE HEADERS
+        let headerRowIndex = 0;
+        let foundHeaders = false;
+
+        // Buscar la primera fila que parece tener headers (en las primeras 5 filas)
+        for (let i = 0; i < Math.min(5, jsonData.length); i++) {
+          if (isHeaderRow(jsonData[i])) {
+            headerRowIndex = i;
+            foundHeaders = true;
+            break;
+          }
+        }
+
+        // Si la primera fila tiene muchos "Unnamed" o está vacía, buscar la siguiente
+        const firstRow = jsonData[0];
+        const unnamedCount = firstRow.filter(cell => {
+          const val = String(cell || '').trim().toLowerCase();
+          return !val || val.includes('unnamed') || val === 'nan';
+        }).length;
+
+        if (unnamedCount > firstRow.length * 0.5 && !foundHeaders) {
+          // La primera fila parece vacía, buscar headers más abajo
+          for (let i = 1; i < Math.min(5, jsonData.length); i++) {
+            const row = jsonData[i];
+            const hasContent = row.some(cell => {
+              const val = String(cell || '').trim();
+              return val && val.toLowerCase() !== 'nan';
+            });
+            if (hasContent && isHeaderRow(row)) {
+              headerRowIndex = i;
+              setWarning(`Se detectó que los headers están en la fila ${i + 1}. Ajustando automáticamente...`);
+              break;
+            }
+          }
+        }
+
+        // Extraer columnas y filas
+        const columns = jsonData[headerRowIndex].map(col => String(col || '').trim()).filter(c => c && c.toLowerCase() !== 'nan');
+        
+        const rows = jsonData.slice(headerRowIndex + 1).map(row => {
           const obj = {};
           columns.forEach((col, idx) => {
-            obj[col] = row[idx] !== undefined ? String(row[idx]).trim() : '';
+            const val = row[idx];
+            obj[col] = val !== undefined && val !== null && String(val).toLowerCase() !== 'nan' 
+              ? String(val).trim() 
+              : '';
           });
           return obj;
-        }).filter(row => Object.values(row).some(v => v));
+        }).filter(row => {
+          // Filtrar filas completamente vacías
+          return Object.values(row).some(v => v && v.trim());
+        });
+
+        if (columns.length === 0) {
+          setError('No se pudieron detectar columnas válidas en el archivo');
+          return;
+        }
+
+        if (rows.length === 0) {
+          setError('No se encontraron datos en el archivo');
+          return;
+        }
 
         setFileColumns(columns);
         setFileData(rows);
         setMapping(autoMapColumns(columns));
-
+        
         // Nombre sugerido de campaña
         const fileName = uploadedFile.name.replace(/\.[^/.]+$/, '');
         setCampaignName(`Campaña - ${fileName}`);
-
+        
         setStep(2);
       };
       reader.readAsArrayBuffer(uploadedFile);
     } catch (err) {
-      setError('Error al leer el archivo');
+      setError('Error al leer el archivo: ' + err.message);
       console.error(err);
     }
   }, []);
 
-  // Auto-mapear columnas
+  // Auto-mapear columnas con keywords expandidos
   const autoMapColumns = (columns) => {
     const map = {};
-    const lower = columns.map(c => c.toLowerCase());
+    const lowerColumns = columns.map(c => c.toLowerCase().trim());
 
-    const autoMaps = {
-      'email': ['email', 'correo', 'mail', 'e-mail'],
-      'subject': ['asunto', 'subject', 'encabezado', 'titulo'],
-      'body': ['cuerpo', 'body', 'mensaje', 'contenido', 'texto'],
-      'first_name': ['nombre', 'first name', 'first_name'],
-      'last_name': ['apellido', 'last name', 'last_name'],
-      'institution_name': ['institución', 'institucion', 'empresa', 'organización'],
-      'phone': ['teléfono', 'telefono', 'phone', 'celular'],
-      'country': ['país', 'pais', 'country'],
-      'job_title': ['cargo', 'puesto', 'position'],
-      'ai_context': ['contexto', 'notas', 'argumento'],
-    };
-
-    Object.entries(autoMaps).forEach(([field, keywords]) => {
-      const matched = columns.find((col, idx) =>
-        keywords.some(kw => lower[idx].includes(kw))
+    // Para cada campo, buscar la mejor coincidencia
+    Object.entries(AUTO_MAP_KEYWORDS).forEach(([field, keywords]) => {
+      // Buscar coincidencia exacta primero
+      let matched = columns.find((col, idx) => 
+        keywords.some(kw => lowerColumns[idx] === kw)
       );
-      if (matched) map[field] = matched;
+      
+      // Si no hay exacta, buscar parcial
+      if (!matched) {
+        matched = columns.find((col, idx) => 
+          keywords.some(kw => lowerColumns[idx].includes(kw))
+        );
+      }
+      
+      if (matched) {
+        map[field] = matched;
+      }
     });
 
-    // Nombre completo
-    const fullName = columns.find(c =>
-      c.toLowerCase().includes('nombre y apellido') ||
-      c.toLowerCase().includes('nombre completo')
-    );
-    if (fullName) map['_full_name'] = fullName;
+    // Detectar nombre completo
+    const fullNameCol = columns.find(c => {
+      const lower = c.toLowerCase();
+      return lower.includes('nombre y apellido') || 
+             lower.includes('nombre completo') ||
+             lower === 'nombre' && !columns.some(col => col.toLowerCase().includes('apellido'));
+    });
+    
+    if (fullNameCol && !map.first_name) {
+      map['_full_name'] = fullNameCol;
+    }
 
     return map;
   };
@@ -142,9 +241,10 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
 
   // Parsear nombre completo
   const parseFullName = (name) => {
-    const clean = name.replace(/^(Dr\.|Dra\.|Lic\.|Ing\.)\s*/i, '').trim();
+    if (!name) return { firstName: '', lastName: '' };
+    const clean = name.replace(/^(Dr\.|Dra\.|Lic\.|Ing\.|Prof\.)\s*/i, '').trim();
     const parts = clean.split(/\s+/);
-    return parts.length === 1
+    return parts.length === 1 
       ? { firstName: parts[0], lastName: '' }
       : { firstName: parts[0], lastName: parts.slice(1).join(' ') };
   };
@@ -178,6 +278,14 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
     return mapping.email && mapping.subject && mapping.body;
   };
 
+  // Contar emails válidos
+  const getValidEmailCount = () => {
+    return fileData.filter(row => {
+      const email = row[mapping.email];
+      return email && email.includes('@');
+    }).length;
+  };
+
   // Crear campaña
   const handleCreateCampaign = async () => {
     if (!campaignName.trim()) {
@@ -194,7 +302,6 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
         .from('bulk_email_campaigns')
         .insert({
           name: campaignName.trim(),
-          cc_emails: ccEmails.trim(), // <--- NUEVO: Guardamos los CC
           status: 'ready',
           total_emails: fileData.length,
           created_by: user.id
@@ -207,13 +314,29 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
       // 2. Procesar cada fila
       const queueItems = [];
       const seenEmails = new Set();
+      let skippedCount = 0;
 
       for (const row of fileData) {
         const t = transformRow(row);
-
-        if (!t.email || !t.email.includes('@')) continue;
-        if (seenEmails.has(t.email.toLowerCase())) continue;
+        
+        // Validar email
+        if (!t.email || !t.email.includes('@')) {
+          skippedCount++;
+          continue;
+        }
+        
+        // Skip duplicados
+        if (seenEmails.has(t.email.toLowerCase())) {
+          skippedCount++;
+          continue;
+        }
         seenEmails.add(t.email.toLowerCase());
+
+        // Validar que tenga asunto y cuerpo
+        if (!t.subject || !t.body) {
+          skippedCount++;
+          continue;
+        }
 
         // Verificar si el contacto ya existe
         const { data: existingContact } = await supabase
@@ -286,7 +409,7 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto">
       <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-
+      
       <div className="relative flex items-center justify-center min-h-screen p-4">
         <div className="relative w-full max-w-3xl bg-white rounded-2xl shadow-2xl overflow-hidden">
           {/* Header */}
@@ -325,10 +448,19 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
 
           {/* Content */}
           <div className="p-6 max-h-[60vh] overflow-y-auto">
+            {/* Error */}
             {error && (
               <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-xl flex items-start gap-3">
                 <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
                 <p className="text-sm text-red-700">{error}</p>
+              </div>
+            )}
+
+            {/* Warning */}
+            {warning && (
+              <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0" />
+                <p className="text-sm text-amber-700">{warning}</p>
               </div>
             )}
 
@@ -345,7 +477,7 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
                       Excel (.xlsx) o CSV con columnas: Email, Asunto, Cuerpo del mensaje
                     </p>
                     <p className="text-xs text-gray-400">
-                      También podés incluir: Nombre, Apellido, Institución, etc.
+                      El sistema detectará automáticamente los headers aunque no estén en la primera fila
                     </p>
                   </div>
                   <input
@@ -370,33 +502,15 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
                     type="text"
                     value={campaignName}
                     onChange={(e) => setCampaignName(e.target.value)}
-                    className="input w-full px-3 py-2 border border-gray-300 rounded-lg"
+                    className="input"
                     placeholder="Ej: Campaña Pharma Q1 2026"
                   />
                 </div>
 
-                {/* <--- NUEVO: INPUT PARA CC EMAILS ---> */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    En copia a (CC)
-                  </label>
-                  <input
-                    type="text"
-                    value={ccEmails}
-                    onChange={(e) => setCcEmails(e.target.value)}
-                    className="input w-full px-3 py-2 border border-gray-300 rounded-lg"
-                    placeholder="octavio@ejemplo.com, otro@ejemplo.com"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">
-                    Opcional. Separa múltiples correos con comas.
-                  </p>
-                </div>
-                {/* ------------------------------------- */}
-
                 {/* File Info */}
                 <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl">
                   <p className="text-sm text-blue-700">
-                    <strong>Archivo:</strong> {file?.name} • <strong>{fileData.length}</strong> filas con datos
+                    <strong>Archivo:</strong> {file?.name} • <strong>{fileData.length}</strong> filas con datos • <strong>{fileColumns.length}</strong> columnas detectadas
                   </p>
                 </div>
 
@@ -408,10 +522,19 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
                   </h3>
                   <div className="space-y-3">
                     {REQUIRED_FIELDS.map(f => (
-                      <div key={f.key} className="flex items-center justify-between p-3 bg-primary-50 border border-primary-200 rounded-xl">
-                        <p className="font-medium text-gray-900">
-                          {f.label} <span className="text-red-500">*</span>
-                        </p>
+                      <div key={f.key} className={`flex items-center justify-between p-3 rounded-xl border ${
+                        mapping[f.key] ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'
+                      }`}>
+                        <div className="flex items-center gap-2">
+                          {mapping[f.key] ? (
+                            <CheckCircle className="w-4 h-4 text-green-500" />
+                          ) : (
+                            <AlertCircle className="w-4 h-4 text-red-500" />
+                          )}
+                          <p className="font-medium text-gray-900">
+                            {f.label} <span className="text-red-500">*</span>
+                          </p>
+                        </div>
                         <select
                           value={mapping[f.key] || ''}
                           onChange={(e) => handleMappingChange(f.key, e.target.value)}
@@ -429,9 +552,9 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
                 <div>
                   <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
                     <Users className="w-4 h-4 text-gray-500" />
-                    Datos del Contacto (opcionales, se guardarán en Contactos)
+                    Datos del Contacto (opcionales)
                   </h3>
-
+                  
                   {/* Nombre completo toggle */}
                   <div className="p-3 bg-gray-50 rounded-xl border border-gray-200 mb-3">
                     <label className="flex items-center gap-3 cursor-pointer">
@@ -487,13 +610,7 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
               <div className="space-y-6">
                 <div className="p-4 bg-green-50 border border-green-200 rounded-xl">
                   <p className="text-sm text-green-700">
-                    <strong>Campaña:</strong> {campaignName} • <strong>{fileData.length}</strong> emails a enviar
-                    {/* <--- NUEVO: Mostrar aviso de CC en preview ---> */}
-                    {ccEmails && (
-                         <span className="block mt-1 text-xs">
-                           (Con copia a: {ccEmails})
-                         </span>
-                    )}
+                    <strong>Campaña:</strong> {campaignName} • <strong>{getValidEmailCount()}</strong> emails válidos de {fileData.length} filas
                   </p>
                 </div>
 
@@ -505,18 +622,22 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
                     {getPreviewData().map((row, idx) => (
                       <div
                         key={idx}
-                        className="p-4 bg-gray-50 border border-gray-200 rounded-xl"
+                        className={`p-4 rounded-xl border ${
+                          row.email && row.email.includes('@') && row.subject && row.body
+                            ? 'bg-gray-50 border-gray-200'
+                            : 'bg-red-50 border-red-200'
+                        }`}
                       >
                         <div className="flex items-start justify-between">
                           <div className="flex-1 min-w-0">
                             <p className="font-medium text-gray-900 truncate">
-                              Para: {row.first_name ? `${row.first_name} ${row.last_name || ''}` : ''} &lt;{row.email}&gt;
+                              Para: {row.first_name ? `${row.first_name} ${row.last_name || ''}` : ''} &lt;{row.email || 'SIN EMAIL'}&gt;
                             </p>
                             <p className="text-sm text-gray-600 mt-1 truncate">
-                              <strong>Asunto:</strong> {row.subject}
+                              <strong>Asunto:</strong> {row.subject || 'SIN ASUNTO'}
                             </p>
                             <p className="text-xs text-gray-500 mt-1 line-clamp-2">
-                              {row.body?.substring(0, 150)}...
+                              {row.body?.substring(0, 150) || 'SIN CUERPO'}...
                             </p>
                           </div>
                           <button
@@ -533,8 +654,8 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
 
                 <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl">
                   <p className="text-sm text-amber-800">
-                    <strong>Nota:</strong> Los contactos que no existan se crearán automáticamente
-                    en la sección Contactos. Emails duplicados serán ignorados.
+                    <strong>Nota:</strong> Los contactos que no existan se crearán automáticamente. 
+                    Emails duplicados o sin datos requeridos serán ignorados.
                   </p>
                 </div>
               </div>
@@ -565,7 +686,7 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
               {step === 3 && (
                 <button
                   onClick={handleCreateCampaign}
-                  disabled={importing}
+                  disabled={importing || getValidEmailCount() === 0}
                   className="btn-primary"
                 >
                   {importing ? (
@@ -576,7 +697,7 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
                   ) : (
                     <>
                       <CheckCircle className="w-4 h-4" />
-                      Crear Campaña ({fileData.length} emails)
+                      Crear Campaña ({getValidEmailCount()} emails)
                     </>
                   )}
                 </button>
@@ -600,10 +721,10 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
             <div className="p-6 max-h-[60vh] overflow-y-auto">
               <p className="text-sm text-gray-500 mb-1">Para:</p>
               <p className="font-medium text-gray-900 mb-4">{previewEmail.email}</p>
-
+              
               <p className="text-sm text-gray-500 mb-1">Asunto:</p>
               <p className="font-medium text-gray-900 mb-4">{previewEmail.subject}</p>
-
+              
               <p className="text-sm text-gray-500 mb-1">Mensaje:</p>
               <div className="p-4 bg-gray-50 rounded-lg whitespace-pre-wrap text-sm text-gray-700">
                 {previewEmail.body}
