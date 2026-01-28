@@ -9,8 +9,7 @@ import {
   Eye,
   Trash2,
   RefreshCw,
-  Search,
-  Filter
+  Search
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { format } from 'date-fns';
@@ -77,6 +76,13 @@ export const BulkEmailQueueModal = ({ campaign, onClose, onRefresh }) => {
       loadQueue();
       onRefresh?.();
     }
+  };
+
+  // Helper para mostrar CC
+  const renderCC = (ccData) => {
+    if (!ccData) return null;
+    if (Array.isArray(ccData)) return ccData.join(', ');
+    return ccData;
   };
 
   // Stats
@@ -208,6 +214,13 @@ export const BulkEmailQueueModal = ({ campaign, onClose, onRefresh }) => {
                             <p className="text-sm text-gray-500 truncate">{item.to_email}</p>
                           )}
 
+                          {/* Preview rápido de CC en la lista si existe */}
+                          {item.cc_emails && (
+                            <p className="text-xs text-gray-400 mt-0.5 truncate">
+                              <span className="font-medium">CC:</span> {renderCC(item.cc_emails)}
+                            </p>
+                          )}
+
                           <p className="text-sm text-gray-600 mt-1 truncate">
                             <strong>Asunto:</strong> {item.subject}
                           </p>
@@ -277,6 +290,17 @@ export const BulkEmailQueueModal = ({ campaign, onClose, onRefresh }) => {
               <p className="font-medium text-gray-900 mb-4">
                 {previewEmail.to_name && `${previewEmail.to_name} `}&lt;{previewEmail.to_email}&gt;
               </p>
+
+              {/* --- AGREGADO: Mostrar CC en el modal de preview --- */}
+              {previewEmail.cc_emails && (
+                <>
+                  <p className="text-sm text-gray-500 mb-1">En copia (CC):</p>
+                  <p className="font-medium text-gray-900 mb-4">
+                    {renderCC(previewEmail.cc_emails)}
+                  </p>
+                </>
+              )}
+              {/* -------------------------------------------------- */}
 
               <p className="text-sm text-gray-500 mb-1">Asunto:</p>
               <p className="font-medium text-gray-900 mb-4">{previewEmail.subject}</p>
