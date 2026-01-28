@@ -60,6 +60,7 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
   const [error, setError] = useState(null);
   const [warning, setWarning] = useState(null);
   const [previewEmail, setPreviewEmail] = useState(null);
+  const [ccEmails, setCcEmails] = useState(''); // Campo CC global para toda la campaña
 
   // Detectar si una fila parece ser de headers (tiene texto, no datos)
   const isHeaderRow = (row) => {
@@ -370,6 +371,12 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
           }
         }
 
+        // Parsear CC emails
+        const ccList = ccEmails
+          .split(/[,;]/)
+          .map(email => email.trim())
+          .filter(email => email && email.includes('@'));
+
         // Agregar a la cola
         queueItems.push({
           campaign_id: campaign.id,
@@ -378,6 +385,7 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
           to_name: t.first_name ? `${t.first_name} ${t.last_name || ''}`.trim() : null,
           subject: t.subject,
           body: t.body,
+          cc_emails: ccList.length > 0 ? ccList : null,
           status: 'pending'
         });
       }
@@ -505,6 +513,23 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
                     className="input"
                     placeholder="Ej: Campaña Pharma Q1 2026"
                   />
+                </div>
+
+                {/* CC Emails */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    En copia a (CC)
+                  </label>
+                  <input
+                    type="text"
+                    value={ccEmails}
+                    onChange={(e) => setCcEmails(e.target.value)}
+                    className="input"
+                    placeholder="octavio.carranza.torres@digpatho.com"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Opcional. Separa múltiples correos con comas.
+                  </p>
                 </div>
 
                 {/* File Info */}
