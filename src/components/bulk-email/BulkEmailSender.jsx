@@ -105,28 +105,33 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
     // Construir MIME
     const encodedSubject = `=?UTF-8?B?${btoa(unescape(encodeURIComponent(queueItem.subject)))}?=`;
 
-    // --- CORRECCIÓN CC ---
-    // Extraemos los CC del item de la cola (donde los guardó el Importador)
-    let ccString = '';
-    if (queueItem.cc_emails && Array.isArray(queueItem.cc_emails) && queueItem.cc_emails.length > 0) {
-        ccString = queueItem.cc_emails.join(', ');
-    } else if (typeof queueItem.cc_emails === 'string' && queueItem.cc_emails.includes('@')) {
-        ccString = queueItem.cc_emails; // Fallback por si viene como string
-    }
-
+    // Headers base
     const headers = [
       `From: "${fromName}" <${fromEmail}>`,
       `To: ${queueItem.to_email}`,
+      `Subject: ${encodedSubject}`,
+      'MIME-Version: 1.0',
+      'Content-Type: text/plain; charset=UTF-8'
     ];
 
-    // Si hay CC, lo agregamos al header
-    if (ccString) {
-        headers.push(`Cc: ${ccString}`);
+    // --- CORRECCIÓN CC ---
+    // Buscamos el CC en el ITEM de la cola (queueItem), no en la campaña
+    let ccString = '';
+    
+    if (queueItem.cc_emails) {
+      if (Array.isArray(queueItem.cc_emails) && queueItem.cc_emails.length > 0) {
+        ccString = queueItem.cc_emails.join(', ');
+      } else if (typeof queueItem.cc_emails === 'string' && queueItem.cc_emails.includes('@')) {
+        ccString = queueItem.cc_emails;
+      }
     }
 
-    headers.push(`Subject: ${encodedSubject}`);
-    headers.push('MIME-Version: 1.0');
-    headers.push('Content-Type: text/plain; charset=UTF-8');
+    // Si encontramos CC válido, lo insertamos en los headers (después del To, antes del Subject)
+    if (ccString) {
+      // headers[0] is From, headers[1] is To. Insert at index 2.
+      headers.splice(2, 0, `Cc: ${ccString}`);
+    }
+    // ---------------------
 
     const emailContent = [
       ...headers,
@@ -241,7 +246,7 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
             })
             .eq('id', queueItem.id);
 
-          // Registrar interacción
+          // Registrar interacción en el historial
           let targetContactId = queueItem.contact_id;
 
           if (!targetContactId) {
@@ -259,7 +264,7 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
           if (targetContactId) {
             // Preparamos el contenido visible en el historial
             let historyContent = queueItem.body;
-            // Si hubo CC, lo agregamos al historial para que quede constancia
+            // Si hubo CC, lo agregamos al historial
             if (queueItem.cc_emails && Array.isArray(queueItem.cc_emails) && queueItem.cc_emails.length > 0) {
                 historyContent = `[CC: ${queueItem.cc_emails.join(', ')}]\n\n${historyContent}`;
             }
