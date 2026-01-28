@@ -90,7 +90,7 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
     return nonEmptyCount > 0 && (headerLikeCount / nonEmptyCount) > 0.3;
   };
 
-  // Leer archivo con detección inteligente de headers
+  // Leer archivo con detección inteligente de headers Y CORRECCIÓN DE ÍNDICES
   const handleFileUpload = useCallback(async (e) => {
     const uploadedFile = e.target.files[0];
     if (!uploadedFile) return;
@@ -148,22 +148,43 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
           }
         }
 
-        // Extraer columnas y filas
-        const columns = jsonData[headerRowIndex].map(col => String(col || '').trim()).filter(c => c && c.toLowerCase() !== 'nan');
+        // --- CORRECCIÓN CRÍTICA DE ÍNDICES ---
+        // 1. Identificar columnas válidas y sus ÍNDICES ORIGINALES
+        const rawHeaderRow = jsonData[headerRowIndex];
+        const validColumnsMap = []; // Guardará { name: 'Email', index: 2 }
+
+        rawHeaderRow.forEach((cell, originalIndex) => {
+            const colName = String(cell || '').trim();
+            if (colName && colName.toLowerCase() !== 'nan') {
+                validColumnsMap.push({
+                    name: colName,
+                    index: originalIndex // Guardamos dónde está realmente en el Excel
+                });
+            }
+        });
+
+        // Extraemos solo los nombres para el estado
+        const columns = validColumnsMap.map(c => c.name);
         
+        // 2. Extraer filas usando los ÍNDICES ORIGINALES para no desfasar datos
         const rows = jsonData.slice(headerRowIndex + 1).map(row => {
           const obj = {};
-          columns.forEach((col, idx) => {
-            const val = row[idx];
-            obj[col] = val !== undefined && val !== null && String(val).toLowerCase() !== 'nan' 
+          
+          // Iteramos sobre nuestro mapa que tiene los índices correctos
+          validColumnsMap.forEach(({ name, index }) => {
+            const val = row[index]; // Usamos el índice original
+            
+            obj[name] = val !== undefined && val !== null && String(val).toLowerCase() !== 'nan' 
               ? String(val).trim() 
               : '';
           });
+          
           return obj;
         }).filter(row => {
           // Filtrar filas completamente vacías
           return Object.values(row).some(v => v && v.trim());
         });
+        // -------------------------------------
 
         if (columns.length === 0) {
           setError('No se pudieron detectar columnas válidas en el archivo');
