@@ -1,13 +1,15 @@
 // src/hooks/useEmailGeneration.js
 import { useState } from 'react';
 import { supabase } from '../lib/supabase';
-// IMPORTAMOS LA CONFIGURACIÓN AVANZADA
-import { EMAIL_AGENT_SYSTEM_PROMPT, buildEmailGenerationPrompt } from '../config/aiPrompts';
+import {
+  buildSystemPromptWithProject,
+  buildEmailGenerationPrompt
+} from '../config/aiPrompts';
 
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 
 // ========================================
-// AJUSTES DE TONO (Overrides sobre el Prompt Base)
+// AJUSTES DE TONO
 // ========================================
 const TONE_ADJUSTMENTS = {
   professional: `
@@ -39,9 +41,21 @@ export const useEmailGeneration = () => {
 
   /**
    * Genera un email personalizado
+   * @param {string} contactId - ID del contacto
+   * @param {string} emailType - Tipo de email (follow-up, first-contact, etc.)
+   * @param {object} config - Configuración adicional
+   * @param {string} config.tone - Tono del email
+   * @param {string} config.language - Idioma
+   * @param {string} config.project - Proyecto/modelo (breast_her2, prostate_gleason, etc.)
+   * @param {string} config.customContext - Contexto personalizado (si project === 'custom')
    */
   const generateEmail = async (contactId, emailType = 'follow-up', config = {}) => {
-    const { tone = 'professional', language = 'es' } = config;
+    const {
+      tone = 'professional',
+      language = 'es',
+      project = 'breast_her2',
+      customContext = ''
+    } = config;
 
     setIsGenerating(true);
     setError(null);
@@ -65,12 +79,12 @@ export const useEmailGeneration = () => {
         .order('occurred_at', { ascending: false })
         .limit(5);
 
-      // 3. Construir el System Prompt COMBINADO
-      // Usamos el prompt base de aiPrompts.js + el ajuste de tono + idioma
-      const systemPrompt = buildCombinedSystemPrompt(tone, language);
+      // 3. Construir System Prompt con PROYECTO
+      const baseSystemPrompt = buildSystemPromptWithProject(project, customContext);
+      const systemPrompt = buildCombinedSystemPrompt(baseSystemPrompt, tone, language);
 
-      // 4. Construir el User Prompt (usando la función avanzada de aiPrompts.js)
-      const userPrompt = buildEmailGenerationPrompt(contact, interactions || [], emailType);
+      // 4. Construir User Prompt
+      const userPrompt = buildEmailGenerationPrompt(contact, interactions || [], emailType, project);
 
       // 5. Llamar a la API de Claude
       const response = await fetch(ANTHROPIC_API_URL, {
@@ -82,8 +96,8 @@ export const useEmailGeneration = () => {
           'anthropic-dangerous-direct-browser-access': 'true'
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514', // O el modelo que prefieras usar
-          max_tokens: 1024,
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 1500,
           system: systemPrompt,
           messages: [
             { role: 'user', content: userPrompt }
@@ -114,6 +128,8 @@ export const useEmailGeneration = () => {
             email_type: emailType,
             tone: tone,
             language: language,
+            project: project,
+            custom_context: customContext || null,
             contact_snapshot: {
               name: `${contact.first_name} ${contact.last_name}`,
               institution: contact.institution?.name
@@ -132,7 +148,7 @@ export const useEmailGeneration = () => {
         body: parsed.body,
         notes: parsed.notes,
         contact,
-        config: { tone, language, emailType },
+        config: { tone, language, emailType, project },
         generatedAt: new Date().toISOString()
       };
 
@@ -169,15 +185,14 @@ export const useEmailGeneration = () => {
 // HELPERS
 // ========================================
 
-function buildCombinedSystemPrompt(tone, language) {
+function buildCombinedSystemPrompt(basePrompt, tone, language) {
   const languageInstructions = {
     es: 'IDIOMA: Escribe SIEMPRE en ESPAÑOL (neutro o rioplatense según contexto).',
     en: 'LANGUAGE: Write ALWAYS in ENGLISH.',
     pt: 'IDIOMA: Escreva SEMPRE em PORTUGUÊS.'
   };
 
-  // Aquí ocurre la magia: Combinamos el prompt general de la empresa con el ajuste específico
-  return `${EMAIL_AGENT_SYSTEM_PROMPT}
+  return `${basePrompt}
 
 ---
 ${languageInstructions[language] || languageInstructions.es}

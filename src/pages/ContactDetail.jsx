@@ -22,19 +22,22 @@ import {
   Globe,
   MessageCircle,
   Zap,
-  RefreshCw // Icono para indicar sincronización
+  RefreshCw,
+  Target,
+  ChevronUp
 } from 'lucide-react';
 import { formatDistanceToNow, format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { supabase } from '../lib/supabase';
 import { useEmailGeneration } from '../hooks/useEmailGeneration';
-import { useGmail } from '../hooks/useGmail'; // Importamos el hook actualizado
+import { useGmail } from '../hooks/useGmail';
 import { EmailDraftModal } from '../components/email/EmailDraftModal';
 import { ContactForm } from '../components/contacts/ContactForm';
 import { AddInteractionModal } from '../components/interactions/AddInteractionModal';
+import { PROJECT_OPTIONS } from '../config/aiPrompts';
 
 // ========================================
-// CONFIGURACIÓN DE TONOS E IDIOMAS
+// CONFIGURACIÓN
 // ========================================
 const TONE_OPTIONS = [
   { value: 'professional', label: 'Profesional', icon: '🎯', description: 'Formal y directo' },
@@ -43,9 +46,9 @@ const TONE_OPTIONS = [
 ];
 
 const LANGUAGE_OPTIONS = [
-  { value: 'es', label: 'Español', flag: '🇪🇸' },
-  { value: 'en', label: 'English', flag: '🇺🇸' },
-  { value: 'pt', label: 'Português', flag: '🇧🇷' },
+  { value: 'es', label: 'ES', fullLabel: 'Español', flag: '🇪🇸' },
+  { value: 'en', label: 'US', fullLabel: 'English', flag: '🇺🇸' },
+  { value: 'pt', label: 'BR', fullLabel: 'Português', flag: '🇧🇷' },
 ];
 
 const EMAIL_TYPE_OPTIONS = [
@@ -56,7 +59,7 @@ const EMAIL_TYPE_OPTIONS = [
 ];
 
 // ========================================
-// INTEREST BADGE COMPONENT
+// INTEREST BADGE
 // ========================================
 const InterestBadge = ({ level }) => {
   const config = {
@@ -76,12 +79,12 @@ const InterestBadge = ({ level }) => {
 };
 
 // ========================================
-// TIMELINE ITEM COMPONENT
+// TIMELINE ITEM
 // ========================================
 const TimelineItem = ({ interaction }) => {
   const iconMap = {
     email_sent: { icon: Send, color: 'bg-blue-100 text-blue-600' },
-    email_reply: { icon: Mail, color: 'bg-green-100 text-green-600' }, // Nuevo tipo para respuestas
+    email_reply: { icon: Mail, color: 'bg-green-100 text-green-600' },
     email_received: { icon: Mail, color: 'bg-green-100 text-green-600' },
     meeting: { icon: Video, color: 'bg-violet-100 text-violet-600' },
     call: { icon: Phone, color: 'bg-amber-100 text-amber-600' },
@@ -92,8 +95,6 @@ const TimelineItem = ({ interaction }) => {
   };
 
   const { icon: Icon, color } = iconMap[interaction.type] || iconMap.note;
-
-  // Formato para mostrar respuesta o contenido normal
   const isReply = interaction.type === 'email_reply';
   const displaySubject = isReply ? 'Respuesta Recibida' : (interaction.subject || interaction.type);
 
@@ -139,38 +140,35 @@ export const ContactDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
 
-  // Hooks
   const { generateEmail, isGenerating, generatedDraft, clearDraft } = useEmailGeneration();
-  const { checkContactReplies, syncing } = useGmail(); // Hook de Gmail para sincronización
+  const { checkContactReplies, syncing } = useGmail();
 
-  // Estados
   const [contact, setContact] = useState(null);
   const [interactions, setInteractions] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Modales
   const [showEditModal, setShowEditModal] = useState(false);
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [showInteractionModal, setShowInteractionModal] = useState(false);
 
-  // Configuración de Email
+  // Configuración de Email - AGREGADO: project y customContext
   const [emailConfig, setEmailConfig] = useState({
     tone: 'professional',
     language: 'es',
-    emailType: 'follow-up'
+    emailType: 'follow-up',
+    project: 'breast_her2',
+    customContext: ''
   });
 
-  // No usamos showEmailConfig ya que el panel está siempre visible en desktop
-  // const [showEmailConfig, setShowEmailConfig] = useState(false);
+  // Toggle para mostrar opciones avanzadas
+  const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
 
   useEffect(() => {
     loadContact();
     loadInteractions();
 
-    // Sincronizar correos al entrar al perfil
     if (id) {
       checkContactReplies(id).then(() => {
-        // Recargar interacciones después de sincronizar por si hubo respuestas nuevas
         loadInteractions();
       });
     }
@@ -179,10 +177,7 @@ export const ContactDetail = () => {
   const loadContact = async () => {
     const { data, error } = await supabase
       .from('contacts')
-      .select(`
-        *,
-        institution:institutions(*)
-      `)
+      .select(`*, institution:institutions(*)`)
       .eq('id', id)
       .single();
 
@@ -206,17 +201,17 @@ export const ContactDetail = () => {
   };
 
   const handleGenerateEmail = async () => {
-    // Pasar la configuración contextual al generador
     await generateEmail(id, emailConfig.emailType, {
       tone: emailConfig.tone,
-      language: emailConfig.language
+      language: emailConfig.language,
+      project: emailConfig.project,
+      customContext: emailConfig.customContext
     });
     setShowEmailModal(true);
   };
 
   const handleDelete = async () => {
     if (!window.confirm('¿Estás seguro de eliminar este contacto?')) return;
-
     await supabase.from('contacts').delete().eq('id', id);
     navigate('/contacts');
   };
@@ -234,6 +229,7 @@ export const ContactDetail = () => {
   const selectedTone = TONE_OPTIONS.find(t => t.value === emailConfig.tone);
   const selectedLanguage = LANGUAGE_OPTIONS.find(l => l.value === emailConfig.language);
   const selectedEmailType = EMAIL_TYPE_OPTIONS.find(e => e.value === emailConfig.emailType);
+  const selectedProject = PROJECT_OPTIONS.find(p => p.value === emailConfig.project);
 
   return (
     <div className="max-w-5xl mx-auto animate-fade-in">
@@ -267,17 +263,11 @@ export const ContactDetail = () => {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setShowEditModal(true)}
-                  className="btn-secondary"
-                >
+                <button onClick={() => setShowEditModal(true)} className="btn-secondary">
                   <Edit3 size={16} />
                   Editar
                 </button>
-                <button
-                  onClick={handleDelete}
-                  className="btn-ghost text-red-600 hover:bg-red-50"
-                >
+                <button onClick={handleDelete} className="btn-ghost text-red-600 hover:bg-red-50">
                   <Trash2 size={16} />
                 </button>
               </div>
@@ -328,13 +318,10 @@ export const ContactDetail = () => {
               </div>
             )}
 
-            {/* Tags */}
             {contact.tags && contact.tags.length > 0 && (
               <div className="flex flex-wrap gap-2 mt-4">
                 {contact.tags.map((tag, i) => (
-                  <span key={i} className="px-2 py-1 bg-gray-100 text-gray-600 text-sm rounded-lg">
-                    {tag}
-                  </span>
+                  <span key={i} className="px-2 py-1 bg-gray-100 text-gray-600 text-sm rounded-lg">{tag}</span>
                 ))}
               </div>
             )}
@@ -346,11 +333,10 @@ export const ContactDetail = () => {
               <div className="flex items-center gap-2">
                 <MessageSquare size={20} className="text-gray-400" />
                 <h2 className="font-semibold text-gray-900">Historial de Interacciones</h2>
-                {/* Indicador de Sincronización */}
                 {syncing ? (
                   <span className="flex items-center gap-1.5 px-2 py-1 bg-blue-50 text-blue-600 text-xs font-medium rounded-lg">
                     <RefreshCw className="w-3 h-3 animate-spin" />
-                    Sincronizando Gmail...
+                    Sincronizando...
                   </span>
                 ) : (
                   <span className="px-2 py-0.5 bg-gray-100 text-gray-600 text-xs font-medium rounded-full">
@@ -358,10 +344,7 @@ export const ContactDetail = () => {
                   </span>
                 )}
               </div>
-              <button
-                onClick={() => setShowInteractionModal(true)}
-                className="btn-secondary text-sm"
-              >
+              <button onClick={() => setShowInteractionModal(true)} className="btn-secondary text-sm">
                 <Plus size={16} />
                 Agregar
               </button>
@@ -377,10 +360,7 @@ export const ContactDetail = () => {
                 <div className="text-center py-8">
                   <Clock size={32} className="mx-auto text-gray-300 mb-3" />
                   <p className="text-gray-500">No hay interacciones registradas</p>
-                  <button
-                    onClick={() => setShowInteractionModal(true)}
-                    className="mt-3 text-sm text-primary-600 hover:text-primary-700 font-medium"
-                  >
+                  <button onClick={() => setShowInteractionModal(true)} className="mt-3 text-sm text-primary-600 hover:text-primary-700 font-medium">
                     Agregar primera interacción
                   </button>
                 </div>
@@ -390,10 +370,9 @@ export const ContactDetail = () => {
         </div>
 
         {/* ========================================
-            SIDEBAR CON GENERADOR DE EMAIL
+            SIDEBAR - GENERADOR DE EMAIL
             ======================================== */}
         <div className="space-y-6">
-          {/* AI Email Generator Card */}
           <div className="card overflow-hidden">
             <div className="p-4 bg-gradient-to-r from-primary-500 to-primary-700 text-white">
               <h3 className="font-semibold flex items-center gap-2">
@@ -406,94 +385,173 @@ export const ContactDetail = () => {
             </div>
 
             <div className="p-4 space-y-4">
-              {/* Tipo de Email */}
+              {/* 🎯 PROYECTO / OBJETIVO - NUEVO */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Tipo de Email
+                <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
+                  <Target size={14} />
+                  Proyecto / Objetivo
                 </label>
-                <div className="grid grid-cols-2 gap-2">
-                  {EMAIL_TYPE_OPTIONS.map(option => (
+                <div className="space-y-2">
+                  {PROJECT_OPTIONS.filter(p => p.value !== 'custom').map(option => (
                     <button
                       key={option.value}
-                      onClick={() => setEmailConfig(prev => ({ ...prev, emailType: option.value }))}
-                      className={`p-2 text-left rounded-xl border-2 transition-all ${
-                        emailConfig.emailType === option.value
+                      onClick={() => setEmailConfig(prev => ({ ...prev, project: option.value, customContext: '' }))}
+                      className={`w-full p-3 text-left rounded-xl border-2 transition-all ${
+                        emailConfig.project === option.value
                           ? 'border-primary-500 bg-primary-50'
                           : 'border-gray-200 hover:border-gray-300'
                       }`}
                     >
-                      <p className={`text-sm font-medium ${
-                        emailConfig.emailType === option.value ? 'text-primary-700' : 'text-gray-900'
-                      }`}>
-                        {option.label}
-                      </p>
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">{option.icon}</span>
+                        <div>
+                          <p className={`text-sm font-medium ${
+                            emailConfig.project === option.value ? 'text-primary-700' : 'text-gray-900'
+                          }`}>
+                            {option.label}
+                          </p>
+                          <p className="text-xs text-gray-500">{option.description}</p>
+                        </div>
+                      </div>
                     </button>
                   ))}
+
+                  {/* Opción Custom */}
+                  <button
+                    onClick={() => setEmailConfig(prev => ({ ...prev, project: 'custom' }))}
+                    className={`w-full p-3 text-left rounded-xl border-2 transition-all ${
+                      emailConfig.project === 'custom'
+                        ? 'border-primary-500 bg-primary-50'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg">✏️</span>
+                      <div>
+                        <p className={`text-sm font-medium ${
+                          emailConfig.project === 'custom' ? 'text-primary-700' : 'text-gray-900'
+                        }`}>
+                          Personalizado
+                        </p>
+                        <p className="text-xs text-gray-500">Definir objetivo manualmente</p>
+                      </div>
+                    </div>
+                  </button>
+
+                  {/* Textarea para objetivo personalizado */}
+                  {emailConfig.project === 'custom' && (
+                    <textarea
+                      value={emailConfig.customContext}
+                      onChange={(e) => setEmailConfig(prev => ({ ...prev, customContext: e.target.value }))}
+                      placeholder="Describe el objetivo del email... Ej: Invitar a participar como speaker en un webinar sobre patología digital"
+                      className="w-full p-3 text-sm border border-gray-200 rounded-xl focus:border-primary-500 outline-none resize-none"
+                      rows={3}
+                    />
+                  )}
                 </div>
               </div>
 
-              {/* Tono */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
-                  <MessageCircle size={14} />
-                  Tono
-                </label>
-                <div className="flex gap-2">
-                  {TONE_OPTIONS.map(option => (
-                    <button
-                      key={option.value}
-                      onClick={() => setEmailConfig(prev => ({ ...prev, tone: option.value }))}
-                      className={`flex-1 p-3 rounded-xl border-2 transition-all text-center ${
-                        emailConfig.tone === option.value
-                          ? 'border-primary-500 bg-primary-50'
-                          : 'border-gray-200 hover:border-gray-300'
-                      }`}
-                      title={option.description}
-                    >
-                      <span className="text-lg">{option.icon}</span>
-                      <p className={`text-xs font-medium mt-1 ${
-                        emailConfig.tone === option.value ? 'text-primary-700' : 'text-gray-600'
-                      }`}>
-                        {option.label}
-                      </p>
-                    </button>
-                  ))}
-                </div>
-              </div>
+              {/* Toggle opciones avanzadas */}
+              <button
+                onClick={() => setShowAdvancedOptions(!showAdvancedOptions)}
+                className="w-full flex items-center justify-between text-sm text-gray-600 hover:text-gray-900 py-2"
+              >
+                <span>Opciones avanzadas</span>
+                {showAdvancedOptions ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+              </button>
 
-              {/* Idioma */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
-                  <Globe size={14} />
-                  Idioma
-                </label>
-                <div className="flex gap-2">
-                  {LANGUAGE_OPTIONS.map(option => (
-                    <button
-                      key={option.value}
-                      onClick={() => setEmailConfig(prev => ({ ...prev, language: option.value }))}
-                      className={`flex-1 p-2 rounded-xl border-2 transition-all text-center ${
-                        emailConfig.language === option.value
-                          ? 'border-primary-500 bg-primary-50'
-                          : 'border-gray-200 hover:border-gray-300'
-                      }`}
-                    >
-                      <span className="text-lg">{option.flag}</span>
-                      <p className={`text-xs font-medium mt-0.5 ${
-                        emailConfig.language === option.value ? 'text-primary-700' : 'text-gray-600'
-                      }`}>
-                        {option.label}
-                      </p>
-                    </button>
-                  ))}
-                </div>
-              </div>
+              {showAdvancedOptions && (
+                <>
+                  {/* Tipo de Email */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Tipo de Email
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {EMAIL_TYPE_OPTIONS.map(option => (
+                        <button
+                          key={option.value}
+                          onClick={() => setEmailConfig(prev => ({ ...prev, emailType: option.value }))}
+                          className={`p-2 text-left rounded-xl border-2 transition-all ${
+                            emailConfig.emailType === option.value
+                              ? 'border-primary-500 bg-primary-50'
+                              : 'border-gray-200 hover:border-gray-300'
+                          }`}
+                        >
+                          <p className={`text-sm font-medium ${
+                            emailConfig.emailType === option.value ? 'text-primary-700' : 'text-gray-900'
+                          }`}>
+                            {option.label}
+                          </p>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Tono */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
+                      <MessageCircle size={14} />
+                      Tono
+                    </label>
+                    <div className="flex gap-2">
+                      {TONE_OPTIONS.map(option => (
+                        <button
+                          key={option.value}
+                          onClick={() => setEmailConfig(prev => ({ ...prev, tone: option.value }))}
+                          className={`flex-1 p-3 rounded-xl border-2 transition-all text-center ${
+                            emailConfig.tone === option.value
+                              ? 'border-primary-500 bg-primary-50'
+                              : 'border-gray-200 hover:border-gray-300'
+                          }`}
+                          title={option.description}
+                        >
+                          <span className="text-lg">{option.icon}</span>
+                          <p className={`text-xs font-medium mt-1 ${
+                            emailConfig.tone === option.value ? 'text-primary-700' : 'text-gray-600'
+                          }`}>
+                            {option.label}
+                          </p>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Idioma */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
+                      <Globe size={14} />
+                      Idioma
+                    </label>
+                    <div className="flex gap-2">
+                      {LANGUAGE_OPTIONS.map(option => (
+                        <button
+                          key={option.value}
+                          onClick={() => setEmailConfig(prev => ({ ...prev, language: option.value }))}
+                          className={`flex-1 p-2 rounded-xl border-2 transition-all text-center ${
+                            emailConfig.language === option.value
+                              ? 'border-primary-500 bg-primary-50'
+                              : 'border-gray-200 hover:border-gray-300'
+                          }`}
+                        >
+                          <span className="text-lg">{option.flag}</span>
+                          <p className={`text-xs font-medium mt-0.5 ${
+                            emailConfig.language === option.value ? 'text-primary-700' : 'text-gray-600'
+                          }`}>
+                            {option.label}
+                          </p>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
 
               {/* Generate Button */}
               <button
                 onClick={handleGenerateEmail}
-                disabled={isGenerating}
-                className="w-full btn bg-gradient-to-r from-primary-500 to-primary-700 text-white hover:from-primary-600 hover:to-primary-800 justify-center py-3 mt-2"
+                disabled={isGenerating || (emailConfig.project === 'custom' && !emailConfig.customContext.trim())}
+                className="w-full btn bg-gradient-to-r from-primary-500 to-primary-700 text-white hover:from-primary-600 hover:to-primary-800 justify-center py-3 mt-2 disabled:opacity-50"
               >
                 {isGenerating ? (
                   <>
@@ -503,14 +561,14 @@ export const ContactDetail = () => {
                 ) : (
                   <>
                     <Zap size={18} />
-                    Generar {selectedEmailType?.label}
+                    Generar Email
                   </>
                 )}
               </button>
 
               {/* Config Summary */}
               <p className="text-xs text-gray-500 text-center">
-                {selectedTone?.icon} {selectedTone?.label} • {selectedLanguage?.flag} {selectedLanguage?.label}
+                {selectedProject?.icon} {selectedProject?.label} • {selectedTone?.icon} {selectedTone?.label} • {selectedLanguage?.flag}
               </p>
             </div>
           </div>
