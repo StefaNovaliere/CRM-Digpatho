@@ -5,11 +5,8 @@ import {
   Play,
   Pause,
   CheckCircle,
-  XCircle,
   Loader2,
-  Mail,
-  AlertTriangle,
-  Clock
+  AlertTriangle
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../hooks/useAuth';
@@ -108,7 +105,7 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
     // Construir MIME
     const encodedSubject = `=?UTF-8?B?${btoa(unescape(encodeURIComponent(queueItem.subject)))}?=`;
 
-    // Headers con soporte para CC
+    // Headers base
     const headers = [
       `From: "${fromName}" <${fromEmail}>`,
       `To: ${queueItem.to_email}`,
@@ -117,10 +114,24 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
       'Content-Type: text/plain; charset=UTF-8'
     ];
 
-    // Agregar CC si existe
-    if (campaign.cc_emails && campaign.cc_emails.trim()) {
-      headers.splice(2, 0, `Cc: ${campaign.cc_emails}`);
+    // --- CORRECCIÓN CC ---
+    // Buscamos el CC en el ITEM de la cola (queueItem), no en la campaña
+    let ccString = '';
+    
+    if (queueItem.cc_emails) {
+      if (Array.isArray(queueItem.cc_emails) && queueItem.cc_emails.length > 0) {
+        ccString = queueItem.cc_emails.join(', ');
+      } else if (typeof queueItem.cc_emails === 'string' && queueItem.cc_emails.includes('@')) {
+        ccString = queueItem.cc_emails;
+      }
     }
+
+    // Si encontramos CC válido, lo insertamos en los headers (después del To, antes del Subject)
+    if (ccString) {
+      // headers[0] is From, headers[1] is To. Insert at index 2.
+      headers.splice(2, 0, `Cc: ${ccString}`);
+    }
+    // ---------------------
 
     const emailContent = [
       ...headers,
@@ -235,13 +246,9 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
             })
             .eq('id', queueItem.id);
 
-          // =================================================================
-          // <--- CORRECCIÓN AQUÍ: Asegurar registro en el historial (Interactions)
-          // =================================================================
-
+          // Registrar interacción en el historial
           let targetContactId = queueItem.contact_id;
 
-          // Si el item de la cola no tiene ID (ej: importación suelta), buscamos al contacto por email
           if (!targetContactId) {
             const { data: foundContact } = await supabase
               .from('contacts')
@@ -254,23 +261,26 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
             }
           }
 
-          // Solo registramos la interacción si logramos vincular un contacto
           if (targetContactId) {
+            // Preparamos el contenido visible en el historial
+            let historyContent = queueItem.body;
+            // Si hubo CC, lo agregamos al historial
+            if (queueItem.cc_emails && Array.isArray(queueItem.cc_emails) && queueItem.cc_emails.length > 0) {
+                historyContent = `[CC: ${queueItem.cc_emails.join(', ')}]\n\n${historyContent}`;
+            }
+
             await supabase.from('interactions').insert({
               contact_id: targetContactId,
-              type: 'email_sent', // Esto es lo que lee el historial
+              type: 'email_sent',
               subject: queueItem.subject,
-              content: queueItem.body,
+              content: historyContent,
               direction: 'outbound',
               occurred_at: new Date().toISOString(),
               created_by: user.id,
               thread_id: result.threadId,
               gmail_id: result.id,
-              // Opcional: metadata para saber que vino de una campaña masiva
-              // metadata: { campaign_id: campaign.id, campaign_name: campaign.name }
             });
           }
-          // =================================================================
 
           sentCount++;
           addLog(`✓ Enviado a ${queueItem.to_email}`, 'success');

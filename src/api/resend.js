@@ -9,7 +9,7 @@ export const resendClient = {
    * Envía un email usando Resend
    * @param {object} params - Parámetros del email
    */
-  async sendEmail({ to, subject, body, from = null, replyTo = null }) {
+  async sendEmail({ to, subject, body, from = null, replyTo = null, cc = null, bcc = null }) {
     const apiKey = import.meta.env.VITE_RESEND_API_KEY;
 
     if (!apiKey) {
@@ -27,6 +27,16 @@ export const resendClient = {
     if (replyTo) {
       emailData.reply_to = replyTo;
     }
+
+    // --- AGREGADO: Soporte para CC y BCC ---
+    if (cc) {
+      emailData.cc = Array.isArray(cc) ? cc : [cc];
+    }
+
+    if (bcc) {
+      emailData.bcc = Array.isArray(bcc) ? bcc : [bcc];
+    }
+    // ---------------------------------------
 
     const response = await fetch(RESEND_API_URL, {
       method: 'POST',
@@ -106,7 +116,7 @@ export const gmailClient = {
   /**
    * Abre Gmail con el email pre-llenado
    */
-  openCompose({ to, subject, body }) {
+  openCompose({ to, subject, body, cc, bcc }) {
     const params = new URLSearchParams({
       view: 'cm',
       fs: '1',
@@ -115,16 +125,21 @@ export const gmailClient = {
       body: body || ''
     });
 
+    if (cc) params.set('cc', Array.isArray(cc) ? cc.join(',') : cc);
+    if (bcc) params.set('bcc', Array.isArray(bcc) ? bcc.join(',') : bcc);
+
     window.open(`https://mail.google.com/mail/?${params}`, '_blank');
   },
 
   /**
    * Genera un mailto link
    */
-  getMailtoLink({ to, subject, body }) {
+  getMailtoLink({ to, subject, body, cc, bcc }) {
     const params = new URLSearchParams();
     if (subject) params.set('subject', subject);
     if (body) params.set('body', body);
+    if (cc) params.set('cc', Array.isArray(cc) ? cc.join(',') : cc);
+    if (bcc) params.set('bcc', Array.isArray(bcc) ? bcc.join(',') : bcc);
 
     return `mailto:${to || ''}?${params}`;
   }
