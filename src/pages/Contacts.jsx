@@ -10,7 +10,11 @@ import {
   List,
   X,
   Upload,
-  Download
+  Download,
+  MessageSquare,
+  Mail,
+  MailX,
+  Clock
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { ContactCard } from '../components/contacts/ContactCard';
@@ -24,17 +28,27 @@ export const Contacts = () => {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || '');
   const [filterInterest, setFilterInterest] = useState('all');
-  const [viewMode, setViewMode] = useState('grid'); // 'grid' or 'list'
+  const [filterResponse, setFilterResponse] = useState('all'); // NUEVO: filtro de respuesta
+  const [viewMode, setViewMode] = useState('grid');
   const [showCreateModal, setShowCreateModal] = useState(searchParams.get('new') === 'true');
   const [showImportModal, setShowImportModal] = useState(false);
+
+  // Stats de respuesta
+  const [responseStats, setResponseStats] = useState({
+    responded: 0,
+    noResponse: 0,
+    notContacted: 0
+  });
 
   useEffect(() => {
     let mounted = true;
 
     const loadContacts = async () => {
       try {
-        console.log("Cargando contactos...");
-        const { data, error } = await supabase
+        console.log("Cargando contactos con estado de respuesta...");
+
+        // Cargar contactos
+        const { data: contactsData, error: contactsError } = await supabase
           .from('contacts')
           .select(`
             *,
@@ -42,10 +56,63 @@ export const Contacts = () => {
           `)
           .order('created_at', { ascending: false });
 
-        if (error) throw error;
+        if (contactsError) throw contactsError;
+
+        // Cargar interacciones para determinar estado de respuesta
+        const { data: interactionsData, error: interactionsError } = await supabase
+          .from('interactions')
+          .select('contact_id, type, direction')
+          .in('type', ['email_sent', 'email_reply']);
+
+        if (interactionsError) throw interactionsError;
+
+        // Procesar estado de respuesta por contacto
+        const interactionsByContact = {};
+        interactionsData?.forEach(interaction => {
+          if (!interactionsByContact[interaction.contact_id]) {
+            interactionsByContact[interaction.contact_id] = {
+              hasSentEmail: false,
+              hasReceivedReply: false
+            };
+          }
+
+          if (interaction.type === 'email_sent' || interaction.direction === 'outbound') {
+            interactionsByContact[interaction.contact_id].hasSentEmail = true;
+          }
+          if (interaction.type === 'email_reply' || interaction.direction === 'inbound') {
+            interactionsByContact[interaction.contact_id].hasReceivedReply = true;
+          }
+        });
+
+        // Agregar estado de respuesta a cada contacto
+        const contactsWithResponseStatus = contactsData?.map(contact => {
+          const interactions = interactionsByContact[contact.id];
+          let responseStatus = 'not_contacted'; // Sin contactar
+
+          if (interactions) {
+            if (interactions.hasReceivedReply) {
+              responseStatus = 'responded'; // Respondió
+            } else if (interactions.hasSentEmail) {
+              responseStatus = 'no_response'; // Sin respuesta
+            }
+          }
+
+          return {
+            ...contact,
+            responseStatus
+          };
+        }) || [];
+
+        // Calcular stats
+        const stats = {
+          responded: contactsWithResponseStatus.filter(c => c.responseStatus === 'responded').length,
+          noResponse: contactsWithResponseStatus.filter(c => c.responseStatus === 'no_response').length,
+          notContacted: contactsWithResponseStatus.filter(c => c.responseStatus === 'not_contacted').length
+        };
 
         if (mounted) {
-            setContacts(data || []);
+          setContacts(contactsWithResponseStatus);
+          setResponseStats(stats);
         }
       } catch (error) {
         console.error('Error loading contacts:', error);
@@ -57,7 +124,7 @@ export const Contacts = () => {
     loadContacts();
 
     return () => {
-        mounted = false;
+      mounted = false;
     };
   }, []);
 
@@ -85,10 +152,13 @@ export const Contacts = () => {
       contact.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       contact.institution?.name?.toLowerCase().includes(searchQuery.toLowerCase());
 
-    const matchesFilter =
+    const matchesInterest =
       filterInterest === 'all' || contact.interest_level === filterInterest;
 
-    return matchesSearch && matchesFilter;
+    const matchesResponse =
+      filterResponse === 'all' || contact.responseStatus === filterResponse;
+
+    return matchesSearch && matchesInterest && matchesResponse;
   });
 
   const interestFilters = [
@@ -97,6 +167,13 @@ export const Contacts = () => {
     { value: 'warm', label: '🌤️ Tibios', count: contacts.filter(c => c.interest_level === 'warm').length },
     { value: 'cold', label: '❄️ Fríos', count: contacts.filter(c => c.interest_level === 'cold').length },
     { value: 'customer', label: '✅ Clientes', count: contacts.filter(c => c.interest_level === 'customer').length },
+  ];
+
+  const responseFilters = [
+    { value: 'all', label: 'Todos', icon: Mail, count: contacts.length },
+    { value: 'responded', label: 'Respondieron', icon: MessageSquare, count: responseStats.responded, color: 'text-green-600 bg-green-50' },
+    { value: 'no_response', label: 'Sin respuesta', icon: MailX, count: responseStats.noResponse, color: 'text-amber-600 bg-amber-50' },
+    { value: 'not_contacted', label: 'Sin contactar', icon: Clock, count: responseStats.notContacted, color: 'text-gray-500 bg-gray-50' },
   ];
 
   if (loading) {
@@ -117,7 +194,6 @@ export const Contacts = () => {
           <p className="text-gray-500 mt-1">{contacts.length} contactos en total</p>
         </div>
         <div className="flex items-center gap-3">
-          {/* Botón Importar */}
           <button
             onClick={() => setShowImportModal(true)}
             className="btn-secondary"
@@ -125,7 +201,6 @@ export const Contacts = () => {
             <Upload size={18} />
             Importar
           </button>
-          {/* Botón Nuevo */}
           <button
             onClick={() => setShowCreateModal(true)}
             className="btn-primary"
@@ -137,7 +212,8 @@ export const Contacts = () => {
       </div>
 
       {/* Filters Bar */}
-      <div className="card p-4">
+      <div className="card p-4 space-y-4">
+        {/* Search + View Toggle */}
         <div className="flex flex-col lg:flex-row gap-4">
           {/* Search */}
           <div className="relative flex-1">
@@ -157,27 +233,6 @@ export const Contacts = () => {
                 <X size={16} />
               </button>
             )}
-          </div>
-
-          {/* Interest Filter */}
-          <div className="flex items-center gap-2 overflow-x-auto">
-            <Filter size={18} className="text-gray-400 flex-shrink-0" />
-            <div className="flex gap-1">
-              {interestFilters.map(filter => (
-                <button
-                  key={filter.value}
-                  onClick={() => setFilterInterest(filter.value)}
-                  className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors whitespace-nowrap ${
-                    filterInterest === filter.value
-                      ? 'bg-primary-100 text-primary-700'
-                      : 'text-gray-600 hover:bg-gray-100'
-                  }`}
-                >
-                  {filter.label}
-                  <span className="ml-1 text-xs opacity-60">({filter.count})</span>
-                </button>
-              ))}
-            </div>
           </div>
 
           {/* View Mode Toggle */}
@@ -202,6 +257,75 @@ export const Contacts = () => {
             </button>
           </div>
         </div>
+
+        {/* Interest Filter */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-1">
+          <Filter size={18} className="text-gray-400 flex-shrink-0" />
+          <div className="flex gap-1">
+            {interestFilters.map(filter => (
+              <button
+                key={filter.value}
+                onClick={() => setFilterInterest(filter.value)}
+                className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors whitespace-nowrap ${
+                  filterInterest === filter.value
+                    ? 'bg-primary-100 text-primary-700'
+                    : 'text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                {filter.label}
+                <span className="ml-1 text-xs opacity-60">({filter.count})</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Response Filter - NUEVO */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 pt-2 border-t border-gray-100">
+          <MessageSquare size={18} className="text-gray-400 flex-shrink-0" />
+          <span className="text-sm text-gray-500 mr-2">Estado email:</span>
+          <div className="flex gap-2">
+            {responseFilters.map(filter => {
+              const Icon = filter.icon;
+              const isActive = filterResponse === filter.value;
+              return (
+                <button
+                  key={filter.value}
+                  onClick={() => setFilterResponse(filter.value)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors whitespace-nowrap ${
+                    isActive
+                      ? filter.color || 'bg-primary-100 text-primary-700'
+                      : 'text-gray-600 hover:bg-gray-100'
+                  } ${isActive && filter.value !== 'all' ? filter.color : ''}`}
+                >
+                  <Icon size={14} />
+                  {filter.label}
+                  <span className={`text-xs ${isActive ? 'opacity-80' : 'opacity-60'}`}>
+                    ({filter.count})
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Active filters indicator */}
+        {(filterInterest !== 'all' || filterResponse !== 'all' || searchQuery) && (
+          <div className="flex items-center justify-between pt-2 border-t border-gray-100">
+            <span className="text-sm text-gray-500">
+              Mostrando <strong>{filteredContacts.length}</strong> de {contacts.length} contactos
+            </span>
+            <button
+              onClick={() => {
+                setFilterInterest('all');
+                setFilterResponse('all');
+                setSearchQuery('');
+              }}
+              className="text-sm text-primary-600 hover:text-primary-700 font-medium"
+            >
+              Limpiar filtros
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Contacts Grid/List */}
@@ -226,11 +350,11 @@ export const Contacts = () => {
             No se encontraron contactos
           </h3>
           <p className="text-gray-500 mb-4">
-            {searchQuery || filterInterest !== 'all'
+            {searchQuery || filterInterest !== 'all' || filterResponse !== 'all'
               ? 'Prueba con otros filtros de búsqueda'
               : 'Comienza agregando tu primer contacto o importando desde un archivo'}
           </p>
-          {!searchQuery && filterInterest === 'all' && (
+          {!searchQuery && filterInterest === 'all' && filterResponse === 'all' && (
             <div className="flex items-center justify-center gap-3">
               <button
                 onClick={() => setShowImportModal(true)}
