@@ -14,30 +14,57 @@ export const parseEmailContent = (rawContent) => {
   // Buscar el patrón "El [día de semana]," que indica inicio de cita
   // Ejemplos: "El lun, 2 feb 2026...", "El El vie, 30 ene 2026..."
 
-  // Patrón simple: "El " seguido de día de semana abreviado y coma
-  // Incluye variante con "El El" (duplicado común de Gmail)
+  // PATRÓN MEJORADO: Detecta el formato completo de Gmail en español
+  // "El lun, 2 feb 2026 a la(s) 6:26 p.m."
+  // Captura: día, número, mes, año, hora
+  const spanishQuotePatternFull = /(?:El\s+)?El\s+(?:lun|mar|mi[eé]|jue|vie|s[aá]b|dom)\s*,\s*\d+\s+\w+\s+\d{4}\s+a\s+la\(s\)\s+\d+:\d+/i;
+  
+  // Patrón simple como fallback: "El " seguido de día de semana abreviado y coma
   const spanishQuotePattern = /(?:El\s+)?El\s+(?:lun|mar|mi[eé]|jue|vie|s[aá]b|dom)\s*,/i;
 
-  // Patrón inglés: "On Mon," "On Tue," etc.
+  // Patrón inglés completo: "On Mon, Feb 2, 2026 at 6:26 PM"
+  const englishQuotePatternFull = /On\s+(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s*,\s*\w+\s+\d+\s*,\s*\d{4}\s+at\s+\d+:\d+\s*(?:AM|PM)/i;
+  
+  // Patrón inglés simple: "On Mon," "On Tue," etc.
   const englishQuotePattern = /On\s+(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s*,/i;
 
   // Buscar la primera ocurrencia de cualquier patrón de cita
-  const spanishMatch = content.match(spanishQuotePattern);
-  const englishMatch = content.match(englishQuotePattern);
-
+  // Priorizar patrones completos (más específicos) sobre patrones simples
   let cutIndex = content.length;
 
-  if (spanishMatch) {
-    const idx = content.indexOf(spanishMatch[0]);
+  // Intentar con patrón completo español primero
+  const spanishMatchFull = content.match(spanishQuotePatternFull);
+  if (spanishMatchFull) {
+    const idx = content.indexOf(spanishMatchFull[0]);
     if (idx !== -1 && idx < cutIndex) {
       cutIndex = idx;
     }
+  } else {
+    // Fallback a patrón simple
+    const spanishMatch = content.match(spanishQuotePattern);
+    if (spanishMatch) {
+      const idx = content.indexOf(spanishMatch[0]);
+      if (idx !== -1 && idx < cutIndex) {
+        cutIndex = idx;
+      }
+    }
   }
 
-  if (englishMatch) {
-    const idx = content.indexOf(englishMatch[0]);
+  // Intentar con patrón completo inglés
+  const englishMatchFull = content.match(englishQuotePatternFull);
+  if (englishMatchFull) {
+    const idx = content.indexOf(englishMatchFull[0]);
     if (idx !== -1 && idx < cutIndex) {
       cutIndex = idx;
+    }
+  } else {
+    // Fallback a patrón simple
+    const englishMatch = content.match(englishQuotePattern);
+    if (englishMatch) {
+      const idx = content.indexOf(englishMatch[0]);
+      if (idx !== -1 && idx < cutIndex) {
+        cutIndex = idx;
+      }
     }
   }
 
@@ -140,7 +167,7 @@ export const extractEmailMetadata = (rawContent) => {
   }
 
   // Extraer Date
-  const dateMatch = rawContent.match(/^Date:\s*(.+)$/im);
+  const dateMatch = rawContent.match(/^Date:\s*.+$/im);
   if (dateMatch) {
     metadata.date = dateMatch[1].trim();
   }
@@ -156,11 +183,17 @@ export const isRawEmail = (content) => {
 
   const hasHeaders = /^(From|To|Subject|Date):/im.test(content);
   const hasForwarded = /Forwarded message/i.test(content);
-  // Detectar contenido citado de respuestas - patrón español "El lun," "El mar," etc.
+  
+  // Detectar contenido citado - patrones completos
+  const hasSpanishQuoteFull = /(?:El\s+)?El\s+(?:lun|mar|mi[eé]|jue|vie|s[aá]b|dom)\s*,\s*\d+\s+\w+\s+\d{4}\s+a\s+la\(s\)\s+\d+:\d+/i.test(content);
+  const hasEnglishQuoteFull = /On\s+(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s*,\s*\w+\s+\d+\s*,\s*\d{4}\s+at\s+\d+:\d+\s*(?:AM|PM)/i.test(content);
+  
+  // Detectar contenido citado - patrones simples como fallback
   const hasSpanishQuote = /(?:El\s+)?El\s+(?:lun|mar|mi[eé]|jue|vie|s[aá]b|dom)\s*,/i.test(content);
-  // Detectar patrón inglés "On Mon," "On Tue," etc.
   const hasEnglishQuote = /On\s+(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s*,/i.test(content);
+  
   const hasQuotedLines = /^>/m.test(content);
 
-  return hasHeaders || hasForwarded || hasSpanishQuote || hasEnglishQuote || hasQuotedLines;
+  return hasHeaders || hasForwarded || hasSpanishQuoteFull || hasEnglishQuoteFull || 
+         hasSpanishQuote || hasEnglishQuote || hasQuotedLines;
 };
