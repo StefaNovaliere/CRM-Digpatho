@@ -228,7 +228,7 @@ export const InteractionItem = ({
 
           {/* Meeting link */}
           {interaction.meeting_link && (
-
+            <a
               href={interaction.meeting_link}
               target="_blank"
               rel="noopener noreferrer"

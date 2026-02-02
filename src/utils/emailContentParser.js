@@ -10,6 +10,47 @@ export const parseEmailContent = (rawContent) => {
 
   let content = rawContent;
 
+  // 0. REMOVER CONTENIDO CITADO DE RESPUESTAS (QUOTED CONTENT)
+  // Buscar el patrón "El [día de semana]," que indica inicio de cita
+  // Ejemplos: "El lun, 2 feb 2026...", "El El vie, 30 ene 2026..."
+
+  // Patrón simple: "El " seguido de día de semana abreviado y coma
+  // Incluye variante con "El El" (duplicado común de Gmail)
+  const spanishQuotePattern = /(?:El\s+)?El\s+(?:lun|mar|mi[eé]|jue|vie|s[aá]b|dom)\s*,/i;
+
+  // Patrón inglés: "On Mon," "On Tue," etc.
+  const englishQuotePattern = /On\s+(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s*,/i;
+
+  // Buscar la primera ocurrencia de cualquier patrón de cita
+  const spanishMatch = content.match(spanishQuotePattern);
+  const englishMatch = content.match(englishQuotePattern);
+
+  let cutIndex = content.length;
+
+  if (spanishMatch) {
+    const idx = content.indexOf(spanishMatch[0]);
+    if (idx !== -1 && idx < cutIndex) {
+      cutIndex = idx;
+    }
+  }
+
+  if (englishMatch) {
+    const idx = content.indexOf(englishMatch[0]);
+    if (idx !== -1 && idx < cutIndex) {
+      cutIndex = idx;
+    }
+  }
+
+  // Cortar en el índice encontrado
+  if (cutIndex < content.length) {
+    content = content.substring(0, cutIndex);
+  }
+
+  // También remover líneas que empiezan con ">" (quoted lines)
+  content = content.split('\n')
+    .filter(line => !line.trim().startsWith('>'))
+    .join('\n');
+
   // 1. REMOVER HEADERS DE EMAIL CRUDO
   // Patrón para detectar bloques de headers (From:, To:, Subject:, Date:)
   const headerPatterns = [
@@ -37,19 +78,19 @@ export const parseEmailContent = (rawContent) => {
     'Ã³': 'ó',
     'Ãº': 'ú',
     'Ã±': 'ñ',
-    'Ã': 'Á',
+    'Ã\x81': 'Á',
     'Ã‰': 'É',
-    'Ã': 'Í',
+    'Ã\x8D': 'Í',
     'Ã"': 'Ó',
     'Ãš': 'Ú',
-    'Ã'': 'Ñ',
+    "Ã'": 'Ñ',
     'Â°': '°',
     'Â´': '´',
     '&lt;': '<',
     '&gt;': '>',
     '&amp;': '&',
     '&quot;': '"',
-    '&#39;': "'",
+    "&#39;": "'",
   };
 
   Object.entries(encodingFixes).forEach(([bad, good]) => {
@@ -108,13 +149,18 @@ export const extractEmailMetadata = (rawContent) => {
 };
 
 /**
- * Determina si el contenido parece ser un email crudo
+ * Determina si el contenido parece ser un email crudo o tiene contenido citado
  */
 export const isRawEmail = (content) => {
   if (!content) return false;
 
   const hasHeaders = /^(From|To|Subject|Date):/im.test(content);
   const hasForwarded = /Forwarded message/i.test(content);
+  // Detectar contenido citado de respuestas - patrón español "El lun," "El mar," etc.
+  const hasSpanishQuote = /(?:El\s+)?El\s+(?:lun|mar|mi[eé]|jue|vie|s[aá]b|dom)\s*,/i.test(content);
+  // Detectar patrón inglés "On Mon," "On Tue," etc.
+  const hasEnglishQuote = /On\s+(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s*,/i.test(content);
+  const hasQuotedLines = /^>/m.test(content);
 
-  return hasHeaders || hasForwarded;
+  return hasHeaders || hasForwarded || hasSpanishQuote || hasEnglishQuote || hasQuotedLines;
 };
