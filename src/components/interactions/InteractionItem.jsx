@@ -7,6 +7,7 @@ import {
 import { format, formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { useState, useMemo } from 'react';
+import { parseEmailContent, isRawEmail } from '../../utils/emailContentParser';
 
 const iconMap = {
   email_sent: { icon: Send, color: 'bg-blue-100 text-blue-600', label: 'Email Enviado' },
@@ -49,12 +50,17 @@ export const InteractionItem = ({
   };
 
   // Calcular si el contenido necesita ser truncado
-  const { truncatedContent, needsTruncation } = useMemo(() => {
+  const { truncatedContent, needsTruncation, cleanContent } = useMemo(() => {
     if (!interaction.content) {
-      return { truncatedContent: '', needsTruncation: false };
+      return { truncatedContent: '', needsTruncation: false, cleanContent: '' };
     }
 
-    const content = interaction.content;
+    // NUEVO: Limpiar el contenido si es un email crudo
+    let content = interaction.content;
+    if (isRawEmail(content)) {
+      content = parseEmailContent(content);
+    }
+
     const lines = content.split('\n');
 
     // Verificar si excede el límite de líneas o caracteres
@@ -62,7 +68,11 @@ export const InteractionItem = ({
     const exceedsChars = content.length > MAX_CHARS;
 
     if (!exceedsLines && !exceedsChars) {
-      return { truncatedContent: content, needsTruncation: false };
+      return {
+        truncatedContent: content,
+        needsTruncation: false,
+        cleanContent: content
+      };
     }
 
     // Truncar por líneas primero
@@ -78,7 +88,11 @@ export const InteractionItem = ({
       }
     }
 
-    return { truncatedContent: truncated, needsTruncation: true };
+    return {
+      truncatedContent: truncated,
+      needsTruncation: true,
+      cleanContent: content
+    };
   }, [interaction.content]);
 
   if (compact) {
@@ -176,13 +190,13 @@ export const InteractionItem = ({
             )}
           </div>
 
-          {/* Content body - AHORA CON TRUNCADO Y EXPANDIR */}
+          {/* Content body - CON CONTENIDO LIMPIO */}
           {interaction.content && (
             <div className="mt-3">
               <div className={`p-4 bg-gray-50 rounded-lg text-sm text-gray-700 whitespace-pre-wrap ${
                 !isExpanded && needsTruncation ? 'relative' : ''
               }`}>
-                {isExpanded ? interaction.content : truncatedContent}
+                {isExpanded ? cleanContent : truncatedContent}
 
                 {/* Gradiente de fade cuando está truncado */}
                 {!isExpanded && needsTruncation && (
@@ -214,7 +228,7 @@ export const InteractionItem = ({
 
           {/* Meeting link */}
           {interaction.meeting_link && (
-            <a
+
               href={interaction.meeting_link}
               target="_blank"
               rel="noopener noreferrer"
