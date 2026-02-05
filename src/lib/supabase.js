@@ -1,19 +1,11 @@
-// src/lib/supabase.js
-import { createClient } from '@supabase/supabase-js';
+/**
+ * BACKWARD COMPATIBILITY REDIRECT
+ * This file now delegates to the Clean Architecture data layer.
+ * Old imports like `import { supabase } from '../lib/supabase'` will still work.
+ *
+ * New code should use: import { useRepository } from '../presentation/hooks/useRepository';
+ */
+import { getSupabaseClient } from '../data/supabase/client';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-if (!supabaseUrl || !supabaseAnonKey) {
-  console.error('Missing Supabase environment variables');
-}
-
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    autoRefreshToken: true,
-    persistSession: true,
-    detectSessionInUrl: true
-  }
-});
-
+export const supabase = getSupabaseClient();
 export default supabase;
