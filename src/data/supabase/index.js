@@ -1,0 +1,9 @@
+export { getSupabaseClient } from './client';
+export { SupabaseContactRepository } from './SupabaseContactRepository';
+export { SupabaseInstitutionRepository } from './SupabaseInstitutionRepository';
+export { SupabaseInteractionRepository } from './SupabaseInteractionRepository';
+export { SupabaseEmailDraftRepository } from './SupabaseEmailDraftRepository';
+export { SupabaseUserProfileRepository } from './SupabaseUserProfileRepository';
+export { SupabaseAuthRepository } from './SupabaseAuthRepository';
+export { SupabaseNotificationRepository } from './SupabaseNotificationRepository';
+export { SupabaseBulkEmailRepository } from './SupabaseBulkEmailRepository';
