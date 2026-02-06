@@ -1,16 +1,73 @@
-/**
- * BACKWARD COMPATIBILITY REDIRECT
- *
- * The generic useQuery and useRealtime hooks now use the DI container.
- * New code should use specific repository hooks via useRepository instead.
- */
+// src/hooks/useSupabase.js
 import { useState, useEffect } from 'react';
-import { getSupabaseClient } from '../data/supabase/client';
+import { supabase } from '../lib/supabase';
 
-const supabase = getSupabaseClient();
+// Hook para autenticación
+export const useAuth = () => {
+  const [user, setUser] = useState(null);
+  const [session, setSession] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-export { useAuth } from '../presentation/hooks/useAuth';
+  useEffect(() => {
+    // Obtener sesión inicial
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setUser(session?.user ?? null);
+      setLoading(false);
+    });
 
+    // Escuchar cambios de auth
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        setSession(session);
+        setUser(session?.user ?? null);
+      }
+    );
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const signIn = async (email, password) => {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+    if (error) throw error;
+    return data;
+  };
+
+  const signUp = async (email, password) => {
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+    });
+    if (error) throw error;
+    return data;
+  };
+
+  const signOut = async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) throw error;
+  };
+
+  const resetPassword = async (email) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email);
+    if (error) throw error;
+  };
+
+  return {
+    user,
+    session,
+    loading,
+    isAuthenticated: !!session,
+    signIn,
+    signUp,
+    signOut,
+    resetPassword
+  };
+};
+
+// Hook genérico para queries
 export const useQuery = (table, options = {}) => {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -30,26 +87,32 @@ export const useQuery = (table, options = {}) => {
       try {
         let query = supabase.from(table).select(select);
 
+        // Aplicar filtros
         Object.entries(filters).forEach(([key, value]) => {
           if (value !== undefined && value !== null) {
             query = query.eq(key, value);
           }
         });
 
+        // Ordenar
         if (orderBy) {
           const { column, ascending = false } = orderBy;
           query = query.order(column, { ascending });
         }
 
-        if (limit) query = query.limit(limit);
+        // Limitar
+        if (limit) {
+          query = query.limit(limit);
+        }
 
+        // Single o multiple
         if (single) {
-          const { data: result, error: queryError } = await query.single();
-          if (queryError) throw queryError;
+          const { data: result, error } = await query.single();
+          if (error) throw error;
           setData(result);
         } else {
-          const { data: result, error: queryError } = await query;
-          if (queryError) throw queryError;
+          const { data: result, error } = await query;
+          if (error) throw error;
           setData(result || []);
         }
       } catch (err) {
@@ -66,19 +129,29 @@ export const useQuery = (table, options = {}) => {
   return { data, loading, error };
 };
 
+// Hook para real-time subscriptions
 export const useRealtime = (table, callback, filters = {}) => {
   useEffect(() => {
-    const channel = supabase
+    let channel = supabase
       .channel(`${table}_changes`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: table, ...filters },
-        (payload) => callback(payload)
+        {
+          event: '*',
+          schema: 'public',
+          table: table,
+          ...filters
+        },
+        (payload) => {
+          callback(payload);
+        }
       )
       .subscribe();
 
-    return () => supabase.removeChannel(channel);
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [table, callback, JSON.stringify(filters)]);
 };
 
-export default { useQuery, useRealtime };
+export default { useAuth, useQuery, useRealtime };
