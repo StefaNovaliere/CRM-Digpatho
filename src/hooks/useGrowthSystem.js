@@ -10,6 +10,8 @@ export const useGrowthSystem = () => {
   const [drafts, setDrafts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [pipelineRunning, setPipelineRunning] = useState(null); // vertical key or null
+  const [pipelineResult, setPipelineResult] = useState(null);
   const [stats, setStats] = useState({
     totalLeads: 0,
     newLeads: 0,
@@ -226,6 +228,37 @@ export const useGrowthSystem = () => {
     return updateLeadStatus(leadId, 'ignored');
   }, [updateLeadStatus]);
 
+  // ========================================
+  // PIPELINE EXECUTION
+  // ========================================
+  const runPipeline = useCallback(async (vertical, mode = 'full') => {
+    setPipelineRunning(vertical);
+    setPipelineResult(null);
+    setError(null);
+    try {
+      const response = await fetch('/api/growth-pipeline', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vertical, mode }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Error ejecutando pipeline');
+      }
+
+      setPipelineResult(data.results);
+      return data.results;
+    } catch (err) {
+      console.error('Pipeline error:', err);
+      setError(err.message);
+      return null;
+    } finally {
+      setPipelineRunning(null);
+    }
+  }, []);
+
   return {
     leads,
     drafts,
@@ -239,6 +272,10 @@ export const useGrowthSystem = () => {
     updateLeadStatus,
     promoteLeadToContact,
     ignoreLead,
+    runPipeline,
+    pipelineRunning,
+    pipelineResult,
+    setPipelineResult,
   };
 };
 

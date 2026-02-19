@@ -24,7 +24,13 @@ import {
   Filter,
   ChevronDown,
   AlertCircle,
-  Target
+  Target,
+  Play,
+  FileText,
+  Zap,
+  X,
+  Briefcase,
+  Globe
 } from 'lucide-react';
 import { useGrowthSystem } from '../hooks/useGrowthSystem';
 import { DraftReviewModal } from '../components/growth/DraftReviewModal';
@@ -115,7 +121,8 @@ export const GrowthSystem = () => {
   const {
     leads, drafts, stats, loading, error,
     loadLeads, loadDrafts, loadStats,
-    updateDraftStatus, promoteLeadToContact, ignoreLead
+    updateDraftStatus, promoteLeadToContact, ignoreLead,
+    runPipeline, pipelineRunning, pipelineResult, setPipelineResult
   } = useGrowthSystem();
 
   const [activeTab, setActiveTab] = useState('leads');
@@ -123,6 +130,20 @@ export const GrowthSystem = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDraft, setSelectedDraft] = useState(null);
   const [promoting, setPromoting] = useState(null); // leadId being promoted
+  const [showModeMenu, setShowModeMenu] = useState(null); // vertical key or null
+
+  // Pipeline execution
+  const handleRunPipeline = async (vertical, mode) => {
+    setShowModeMenu(null);
+    const result = await runPipeline(vertical, mode);
+    if (result) {
+      // Refresh data after pipeline completes
+      loadStats();
+      const v = selectedVertical === 'all' ? null : selectedVertical;
+      loadLeads({ vertical: v, search: searchQuery || null });
+      loadDrafts({ vertical: v });
+    }
+  };
 
   // Initial load
   useEffect(() => {
@@ -239,30 +260,134 @@ export const GrowthSystem = () => {
         />
       </div>
 
-      {/* Vertical Breakdown */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+      {/* Pipeline Result Banner */}
+      {pipelineResult && (
+        <div className="mb-4 p-4 bg-emerald-50 border border-emerald-200 rounded-xl flex items-start gap-3">
+          <CheckCircle className="w-5 h-5 text-emerald-500 flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-sm font-medium text-emerald-800">
+              Pipeline completado — {GROWTH_VERTICALS[pipelineResult.vertical]?.label || pipelineResult.vertical}
+            </p>
+            <div className="flex items-center gap-4 mt-1 text-sm text-emerald-700">
+              {pipelineResult.leads_found > 0 && (
+                <span>{pipelineResult.leads_found} leads encontrados</span>
+              )}
+              {pipelineResult.leads_inserted > 0 && (
+                <span>{pipelineResult.leads_inserted} insertados</span>
+              )}
+              {pipelineResult.duplicates > 0 && (
+                <span>{pipelineResult.duplicates} duplicados</span>
+              )}
+              {pipelineResult.drafts_created > 0 && (
+                <span>{pipelineResult.drafts_created} borradores creados</span>
+              )}
+            </div>
+          </div>
+          <button onClick={() => setPipelineResult(null)} className="p-1 text-emerald-400 hover:text-emerald-600">
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
+      {/* Vertical Breakdown with Pipeline Buttons */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
         {Object.entries(GROWTH_VERTICALS).map(([key, config]) => {
           const vStats = stats.byVertical[key] || { leads: 0, new: 0 };
           const colors = VERTICAL_COLORS[key];
           const Icon = VERTICAL_ICONS[key];
+          const isRunning = pipelineRunning === key;
+          const isMenuOpen = showModeMenu === key;
+
           return (
-            <button
+            <div
               key={key}
-              onClick={() => setSelectedVertical(selectedVertical === key ? 'all' : key)}
-              className={`p-4 rounded-xl border transition-all text-left ${
+              className={`relative p-4 rounded-xl border transition-all ${
                 selectedVertical === key
                   ? `${colors.bg} border-transparent ring-2 ${colors.ring}`
                   : 'bg-white border-gray-200 hover:border-gray-300'
               }`}
             >
-              <div className="flex items-center gap-2 mb-1">
-                <Icon size={16} className={selectedVertical === key ? colors.text.replace('text-', 'text-') : 'text-gray-400'} />
-                <span className={`text-sm font-semibold ${selectedVertical === key ? colors.text : 'text-gray-900'}`}>
-                  {config.label}
-                </span>
+              {/* Card content — clickable to filter */}
+              <button
+                onClick={() => setSelectedVertical(selectedVertical === key ? 'all' : key)}
+                className="w-full text-left"
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <Icon size={16} className={selectedVertical === key ? colors.text : 'text-gray-400'} />
+                  <span className={`text-sm font-semibold ${selectedVertical === key ? colors.text : 'text-gray-900'}`}>
+                    {config.label}
+                  </span>
+                </div>
+                <p className="text-xs text-gray-500">{vStats.leads} leads | {vStats.new} nuevos</p>
+              </button>
+
+              {/* Run Pipeline Button */}
+              <div className="mt-3 relative">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowModeMenu(isMenuOpen ? null : key);
+                  }}
+                  disabled={isRunning}
+                  className={`w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-semibold rounded-lg transition-all ${
+                    isRunning
+                      ? 'bg-gray-100 text-gray-400 cursor-wait'
+                      : `${colors.accent} text-white hover:opacity-90 shadow-sm`
+                  }`}
+                >
+                  {isRunning ? (
+                    <>
+                      <RefreshCw size={13} className="animate-spin" />
+                      Ejecutando...
+                    </>
+                  ) : (
+                    <>
+                      <Play size={13} />
+                      Ejecutar Pipeline
+                    </>
+                  )}
+                </button>
+
+                {/* Mode selection dropdown */}
+                {isMenuOpen && !isRunning && (
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={() => setShowModeMenu(null)} />
+                    <div className="absolute left-0 right-0 top-full mt-1 z-20 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden animate-scale-in">
+                      <button
+                        onClick={() => handleRunPipeline(key, 'full')}
+                        className="w-full flex items-center gap-2 px-3 py-2.5 text-xs text-left hover:bg-gray-50 transition-colors"
+                      >
+                        <Zap size={13} className="text-violet-500" />
+                        <div>
+                          <p className="font-semibold text-gray-900">Completo</p>
+                          <p className="text-gray-500">Buscar leads + generar borradores</p>
+                        </div>
+                      </button>
+                      <button
+                        onClick={() => handleRunPipeline(key, 'search')}
+                        className="w-full flex items-center gap-2 px-3 py-2.5 text-xs text-left hover:bg-gray-50 transition-colors border-t border-gray-100"
+                      >
+                        <Search size={13} className="text-blue-500" />
+                        <div>
+                          <p className="font-semibold text-gray-900">Solo buscar</p>
+                          <p className="text-gray-500">Descubrir leads sin generar emails</p>
+                        </div>
+                      </button>
+                      <button
+                        onClick={() => handleRunPipeline(key, 'draft')}
+                        className="w-full flex items-center gap-2 px-3 py-2.5 text-xs text-left hover:bg-gray-50 transition-colors border-t border-gray-100"
+                      >
+                        <FileText size={13} className="text-amber-500" />
+                        <div>
+                          <p className="font-semibold text-gray-900">Solo borradores</p>
+                          <p className="text-gray-500">Generar emails para leads existentes</p>
+                        </div>
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
-              <p className="text-xs text-gray-500">{vStats.leads} leads | {vStats.new} nuevos</p>
-            </button>
+            </div>
           );
         })}
       </div>
@@ -358,11 +483,8 @@ export const GrowthSystem = () => {
                   No hay leads todavía
                 </h3>
                 <p className="text-gray-500 max-w-md mx-auto">
-                  Ejecutá el pipeline de prospección para descubrir leads:
+                  Usá el botón <strong>"Ejecutar Pipeline"</strong> en cada vertical para descubrir leads automáticamente.
                 </p>
-                <code className="block mt-3 px-4 py-2 bg-gray-100 rounded-lg text-sm text-gray-700 w-fit mx-auto">
-                  python ai_growth_system.py --vertical all --mode full
-                </code>
               </div>
             ) : (
               <div className="divide-y divide-gray-100">
@@ -475,11 +597,8 @@ export const GrowthSystem = () => {
                   No hay borradores
                 </h3>
                 <p className="text-gray-500 max-w-md mx-auto">
-                  Primero buscá leads y luego generá borradores:
+                  Primero buscá leads y luego usá <strong>"Solo borradores"</strong> en cada vertical para generar emails.
                 </p>
-                <code className="block mt-3 px-4 py-2 bg-gray-100 rounded-lg text-sm text-gray-700 w-fit mx-auto">
-                  python ai_growth_system.py --vertical all --mode draft
-                </code>
               </div>
             ) : (
               <div className="divide-y divide-gray-100">
