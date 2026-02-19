@@ -15,3 +15,6 @@ supabase>=2.0.0
 
 # Environment variable loading from .env.local / .env
 python-dotenv>=1.0.0
+
+# HTTP client for Claude AI API (email personalization)
+httpx>=0.25.0

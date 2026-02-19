@@ -58,6 +58,11 @@ except ImportError:
     create_client = None  # type: ignore
     Client = None  # type: ignore
 
+try:
+    import httpx
+except ImportError:
+    httpx = None  # type: ignore
+
 # ---------------------------------------------------------------------------
 # Logging setup
 # ---------------------------------------------------------------------------
@@ -1256,6 +1261,11 @@ class ContextualCopywriter:
     """
     Generates personalized email drafts based on vertical strategy.
 
+    Uses Claude AI (when ANTHROPIC_API_KEY is available) to generate
+    truly unique emails per lead — adapting tone, arguments, and structure
+    to each person's role, company, and vertical. Falls back to static
+    templates when no API key is configured.
+
     Each draft respects:
     - The vertical's selling points and tone
     - The vertical's anti-patterns (what NOT to say)
@@ -1266,12 +1276,27 @@ class ContextualCopywriter:
     status='draft_pending_review'. NEVER sends emails.
     """
 
+    ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
+    ANTHROPIC_MODEL = "claude-sonnet-4-20250514"
+
     def __init__(self, supabase_client: Any, dry_run: bool = False):
         self.db = supabase_client
         self.dry_run = dry_run
+        self.anthropic_key = (
+            os.environ.get("ANTHROPIC_API_KEY")
+            or os.environ.get("VITE_ANTHROPIC_API_KEY")
+        )
+        self.use_ai = bool(self.anthropic_key and httpx)
+        if self.use_ai:
+            logger.info("[Copywriter] AI mode enabled — emails will be generated with Claude")
+        else:
+            reason = "no httpx" if not httpx else "no ANTHROPIC_API_KEY"
+            logger.info("[Copywriter] Template mode (%s) — using static templates", reason)
         self.stats = {
             "leads_processed": 0,
             "drafts_created": 0,
+            "ai_generated": 0,
+            "template_fallback": 0,
             "errors": 0,
         }
 
@@ -1318,37 +1343,35 @@ class ContextualCopywriter:
     def _generate_single_draft(
         self, lead: Dict[str, Any], vertical: str
     ) -> Optional[Dict[str, Any]]:
-        """Generate a single email draft for a lead."""
+        """Generate a single email draft for a lead (AI or template)."""
         config = VERTICAL_CONFIGS[vertical]
         lang = determine_language(lead.get("geo"))
-
-        # Get template for this vertical + language
-        templates = EMAIL_TEMPLATES.get(vertical, {})
-        lang_templates = templates.get(lang) or templates.get("en")
-        if not lang_templates:
-            logger.error(
-                "[Copywriter] No templates for vertical=%s lang=%s",
-                vertical, lang,
-            )
-            return None
-
-        # Select a random template variant
-        template = random.choice(lang_templates)
-
-        # Prepare placeholders
         name = lead.get("full_name") or "[NOMBRE]"
         company = lead.get("company") or "[EMPRESA]"
         job_title = lead.get("job_title") or "[CARGO]"
 
-        # Fill template
-        subject = template["subject"].format(
-            name=name, company=company, job_title=job_title,
-            event="[EVENT]",
-        )
-        body = template["body"].format(
-            name=name, company=company, job_title=job_title,
-            event="[EVENT]",
-        )
+        # Try AI generation first, fall back to templates
+        if self.use_ai:
+            ai_result = self._generate_with_ai(lead, vertical, config, lang)
+            if ai_result:
+                subject, body = ai_result
+                self.stats["ai_generated"] += 1
+                generation_method = "claude_ai"
+            else:
+                logger.warning(
+                    "[Copywriter] AI generation failed for %s, falling back to template",
+                    name,
+                )
+                subject, body = self._generate_from_template(lead, vertical, lang)
+                self.stats["template_fallback"] += 1
+                generation_method = "template_fallback"
+        else:
+            subject, body = self._generate_from_template(lead, vertical, lang)
+            self.stats["template_fallback"] += 1
+            generation_method = "template"
+
+        if not subject or not body:
+            return None
 
         draft_record = {
             "lead_id": lead.get("id"),
@@ -1364,7 +1387,8 @@ class ContextualCopywriter:
                 "lead_linkedin": lead.get("linkedin_url"),
                 "lead_geo": lead.get("geo"),
                 "vertical_config": config["display_name"],
-                "template_subject": template["subject"],
+                "generation_method": generation_method,
+                "ai_model": self.ANTHROPIC_MODEL if generation_method == "claude_ai" else None,
                 "tone": config["email_tone"],
                 "cta": config.get("email_cta", ""),
                 "anti_patterns": config.get("anti_patterns", []),
@@ -1374,12 +1398,12 @@ class ContextualCopywriter:
 
         if self.dry_run:
             logger.info(
-                "[Copywriter][DRY-RUN] Would create draft:\n"
+                "[Copywriter][DRY-RUN] Would create draft (%s):\n"
                 "  To: %s (%s)\n"
                 "  Vertical: %s | Lang: %s\n"
                 "  Subject: %s\n"
                 "  Body preview: %.120s...",
-                name, company, vertical, lang,
+                generation_method, name, company, vertical, lang,
                 subject, body.replace("\n", " "),
             )
             return draft_record
@@ -1400,8 +1424,8 @@ class ContextualCopywriter:
             )
             if result.data:
                 logger.info(
-                    "[Copywriter] Draft created for %s (%s) — %s [%s]",
-                    name, company, vertical, lang,
+                    "[Copywriter] Draft created (%s) for %s (%s) — %s [%s]",
+                    generation_method, name, company, vertical, lang,
                 )
                 return result.data[0]
             else:
@@ -1419,13 +1443,189 @@ class ContextualCopywriter:
             self.stats["errors"] += 1
             return None
 
+    def _generate_from_template(
+        self, lead: Dict[str, Any], vertical: str, lang: str
+    ) -> Tuple[str, str]:
+        """Generate email from static templates (original behavior)."""
+        templates = EMAIL_TEMPLATES.get(vertical, {})
+        lang_templates = templates.get(lang) or templates.get("en")
+        if not lang_templates:
+            logger.error(
+                "[Copywriter] No templates for vertical=%s lang=%s",
+                vertical, lang,
+            )
+            return "", ""
+
+        template = random.choice(lang_templates)
+        name = lead.get("full_name") or "[NOMBRE]"
+        company = lead.get("company") or "[EMPRESA]"
+        job_title = lead.get("job_title") or "[CARGO]"
+
+        subject = template["subject"].format(
+            name=name, company=company, job_title=job_title,
+            event="[EVENT]",
+        )
+        body = template["body"].format(
+            name=name, company=company, job_title=job_title,
+            event="[EVENT]",
+        )
+        return subject, body
+
+    def _generate_with_ai(
+        self,
+        lead: Dict[str, Any],
+        vertical: str,
+        config: Dict[str, Any],
+        lang: str,
+    ) -> Optional[Tuple[str, str]]:
+        """
+        Generate a personalized email using Claude AI.
+
+        Builds a rich prompt with the lead's data and vertical strategy,
+        producing a unique email adapted to the person's role, company,
+        and context — similar to useEmailGeneration.js on the frontend.
+        """
+        name = lead.get("full_name") or "[NOMBRE]"
+        company = lead.get("company") or "[EMPRESA]"
+        job_title = lead.get("job_title") or "[CARGO]"
+        geo = lead.get("geo") or "Unknown"
+
+        lang_instructions = {
+            "es": "Escribe SIEMPRE en ESPAÑOL (neutro/rioplatense según contexto).",
+            "en": "Write ALWAYS in ENGLISH.",
+            "pt": "Escreva SEMPRE em PORTUGUÊS.",
+        }
+
+        # Build selling points as text
+        selling_points = config.get("selling_points", config.get("content_offers", []))
+        selling_text = "\n".join(f"- {sp}" for sp in selling_points)
+
+        anti_patterns = config.get("anti_patterns", [])
+        anti_text = "\n".join(f"- {ap}" for ap in anti_patterns)
+
+        scientific_ctx = ""
+        if "scientific_context" in config:
+            scientific_ctx = "\n".join(
+                f"- {k}: {v}" for k, v in config["scientific_context"].items()
+            )
+
+        system_prompt = f"""Eres un asistente de comunicación comercial especializado para Digpatho IA, una startup argentina de biotecnología en patología digital.
+
+## CONTEXTO DE LA EMPRESA
+- Digpatho IA: Startup argentina especializada en análisis celular con IA para patología.
+- Trayectoria en HER2, Ki67, RE, RP en cáncer de mama. Ahora expandiendo a Gleason/próstata.
+- Diferenciadores: Tecnología validada en LATAM y África, modelo SaaS sin inversión en escáneres, funciona en cualquier dispositivo.
+
+## VERTICAL ACTUAL: {config['display_name']}
+Tono: {config['email_tone']}
+CTA objetivo: {config.get('email_cta', 'reunión breve')}
+
+## ARGUMENTOS CLAVE PARA ESTA VERTICAL
+{selling_text}
+
+{f'## CONTEXTO CIENTÍFICO{chr(10)}{scientific_ctx}' if scientific_ctx else ''}
+
+## ANTI-PATRONES (lo que NUNCA debes mencionar en este vertical)
+{anti_text}
+
+## REGLAS CRUCIALES
+1. Cada email debe ser ÚNICO — no repitas las mismas frases genéricas.
+2. PERSONALIZA según el cargo, empresa y geografía del lead.
+3. Si el lead tiene cargo conocido, adapta los argumentos a su función específica.
+4. Mantén el email conciso: 4-6 párrafos máximo.
+5. NO inventes datos, publicaciones o logros del lead.
+6. Cierra con un CTA claro y específico.
+7. {lang_instructions.get(lang, lang_instructions['en'])}
+
+## FORMATO DE RESPUESTA
+Responde EXACTAMENTE con este formato:
+
+**Asunto:** [línea de asunto única y relevante para esta persona]
+
+**Cuerpo:**
+[contenido del email personalizado]"""
+
+        user_prompt = f"""Genera un email de primer contacto para este lead:
+
+**Nombre:** {name}
+**Cargo:** {job_title}
+**Empresa:** {company}
+**Geografía:** {geo}
+**Vertical:** {config['display_name']}
+
+Recuerda:
+- Adapta el tono y los argumentos a su cargo ({job_title}) y empresa ({company}).
+- Haz que este email sea DIFERENTE de cualquier otro — no uses fórmulas genéricas.
+- Si el cargo sugiere una función específica (director, investigador, BD, etc.), enfoca los argumentos a lo que le importa a esa persona.
+- Si la empresa es conocida en el sector, menciónala de forma natural."""
+
+        try:
+            response = httpx.post(
+                self.ANTHROPIC_API_URL,
+                headers={
+                    "Content-Type": "application/json",
+                    "x-api-key": self.anthropic_key,
+                    "anthropic-version": "2023-06-01",
+                },
+                json={
+                    "model": self.ANTHROPIC_MODEL,
+                    "max_tokens": 1500,
+                    "temperature": 0.85,
+                    "system": system_prompt,
+                    "messages": [{"role": "user", "content": user_prompt}],
+                },
+                timeout=30.0,
+            )
+
+            if response.status_code != 200:
+                logger.error(
+                    "[Copywriter] Claude API error %d: %s",
+                    response.status_code, response.text[:200],
+                )
+                return None
+
+            data = response.json()
+            text = data["content"][0]["text"]
+            return self._parse_ai_response(text)
+
+        except Exception as exc:
+            logger.error("[Copywriter] AI generation error: %s", exc)
+            return None
+
+    @staticmethod
+    def _parse_ai_response(text: str) -> Optional[Tuple[str, str]]:
+        """Parse Claude's response into (subject, body)."""
+        subject_match = re.search(
+            r"\*\*Asunto:\*\*\s*(.+?)(?=\n|$)", text, re.IGNORECASE
+        )
+        body_match = re.search(
+            r"\*\*Cuerpo:\*\*\s*([\s\S]*?)(?=\*\*Notas internas:\*\*|$)",
+            text, re.IGNORECASE,
+        )
+
+        subject = subject_match.group(1).strip() if subject_match else ""
+        if body_match:
+            body = body_match.group(1).strip()
+        else:
+            # Fallback: everything after subject
+            body = re.sub(
+                r"\*\*Asunto:\*\*.*\n?", "", text, flags=re.IGNORECASE
+            ).strip()
+
+        if not subject or not body:
+            return None
+
+        return subject, body
+
     def _log_stats(self) -> None:
         """Log generation statistics."""
         logger.info(
-            "[Copywriter] Stats: %d leads processed, %d drafts created, "
-            "%d errors",
+            "[Copywriter] Stats: %d leads processed, %d drafts created "
+            "(%d AI-generated, %d template), %d errors",
             self.stats["leads_processed"],
             self.stats["drafts_created"],
+            self.stats["ai_generated"],
+            self.stats["template_fallback"],
             self.stats["errors"],
         )
 
