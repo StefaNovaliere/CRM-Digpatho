@@ -13,7 +13,8 @@ import {
   Building2,
   Briefcase,
   Globe,
-  MessageSquare
+  MessageSquare,
+  AtSign
 } from 'lucide-react';
 import { GROWTH_VERTICALS } from '../../config/constants';
 
@@ -107,6 +108,20 @@ export const DraftReviewModal = ({ draft, onClose, onApprove, onReject }) => {
                 </span>
               </div>
             </div>
+
+            {/* Email */}
+            {lead.email && (
+              <div className="flex items-center gap-2 p-3 bg-blue-50 rounded-xl text-sm">
+                <AtSign className="w-4 h-4 text-blue-500" />
+                <span className="text-gray-500">Email:</span>
+                <a
+                  href={`mailto:${lead.email}`}
+                  className="font-medium text-blue-600 hover:text-blue-700 hover:underline"
+                >
+                  {lead.email}
+                </a>
+              </div>
+            )}
 
             {/* LinkedIn */}
             {lead.linkedin_url && (

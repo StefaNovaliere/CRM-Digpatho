@@ -193,6 +193,7 @@ export const useGrowthSystem = () => {
       const contactData = {
         first_name: lead.first_name || lead.full_name?.split(' ')[0] || '',
         last_name: lead.last_name || lead.full_name?.split(' ').slice(1).join(' ') || '',
+        email: lead.email || '',
         job_title: lead.job_title || '',
         interest_level: 'cold',
         role: 'other',
@@ -200,6 +201,7 @@ export const useGrowthSystem = () => {
         ai_context: [
           `Vertical: ${lead.vertical}`,
           lead.company ? `Empresa: ${lead.company}` : null,
+          lead.email ? `Email: ${lead.email}` : null,
           lead.geo ? `Geo: ${lead.geo}` : null,
           `LinkedIn: ${lead.linkedin_url}`,
           `Descubierto por Growth System el ${new Date(lead.created_at).toLocaleDateString()}`
