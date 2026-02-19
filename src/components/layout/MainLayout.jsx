@@ -19,7 +19,8 @@ import {
   Check,
   Mail,
   Loader2,
-  Send // <--- AGREGADO AQUÍ
+  Send,
+  Rocket
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { supabase } from '../../lib/supabase';
@@ -139,8 +140,8 @@ export const MainLayout = () => {
     { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
     { to: '/contacts', icon: Users, label: 'Contactos' },
     { to: '/institutions', icon: Building2, label: 'Instituciones' },
-    // NUEVO LINK AGREGADO AQUÍ
     { to: '/bulk-email', icon: Send, label: 'Envío Masivo' },
+    { to: '/growth', icon: Rocket, label: 'Growth System', isNew: true },
   ];
 
   const secondaryNav = [
@@ -185,6 +186,11 @@ export const MainLayout = () => {
                   >
                     <item.icon className="w-5 h-5" />
                     <span>{item.label}</span>
+                    {item.isNew && (
+                      <span className="ml-auto px-1.5 py-0.5 text-[10px] font-bold bg-emerald-100 text-emerald-700 rounded">
+                        NUEVO
+                      </span>
+                    )}
                   </NavLink>
                 ))}
               </div>
