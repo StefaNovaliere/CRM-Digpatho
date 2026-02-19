@@ -58,21 +58,22 @@ export const Contacts = () => {
 
         if (contactsError) throw contactsError;
 
-        // Cargar interacciones para determinar estado de respuesta
+        // Cargar interacciones para determinar estado de respuesta Y búsqueda por email
         const { data: interactionsData, error: interactionsError } = await supabase
           .from('interactions')
-          .select('contact_id, type, direction')
-          .in('type', ['email_sent', 'email_reply']);
+          .select('contact_id, type, direction, subject')
+          .in('type', ['email_sent', 'email_reply', 'email_received']);
 
         if (interactionsError) throw interactionsError;
 
-        // Procesar estado de respuesta por contacto
+        // Procesar estado de respuesta y asuntos de email por contacto
         const interactionsByContact = {};
         interactionsData?.forEach(interaction => {
           if (!interactionsByContact[interaction.contact_id]) {
             interactionsByContact[interaction.contact_id] = {
               hasSentEmail: false,
-              hasReceivedReply: false
+              hasReceivedReply: false,
+              emailSubjects: []
             };
           }
 
@@ -81,6 +82,11 @@ export const Contacts = () => {
           }
           if (interaction.type === 'email_reply' || interaction.direction === 'inbound') {
             interactionsByContact[interaction.contact_id].hasReceivedReply = true;
+          }
+
+          // Acumular asuntos de emails para búsqueda
+          if (interaction.subject) {
+            interactionsByContact[interaction.contact_id].emailSubjects.push(interaction.subject);
           }
         });
 
@@ -99,7 +105,8 @@ export const Contacts = () => {
 
           return {
             ...contact,
-            responseStatus
+            responseStatus,
+            emailSubjects: interactions?.emailSubjects || []
           };
         }) || [];
 
@@ -146,11 +153,13 @@ export const Contacts = () => {
 
   // Filter contacts
   const filteredContacts = contacts.filter(contact => {
+    const query = searchQuery.toLowerCase();
     const matchesSearch =
       searchQuery === '' ||
-      `${contact.first_name} ${contact.last_name}`.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      contact.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      contact.institution?.name?.toLowerCase().includes(searchQuery.toLowerCase());
+      `${contact.first_name} ${contact.last_name}`.toLowerCase().includes(query) ||
+      contact.email?.toLowerCase().includes(query) ||
+      contact.institution?.name?.toLowerCase().includes(query) ||
+      contact.emailSubjects?.some(subject => subject.toLowerCase().includes(query));
 
     const matchesInterest =
       filterInterest === 'all' || contact.interest_level === filterInterest;
@@ -220,7 +229,7 @@ export const Contacts = () => {
             <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
               type="text"
-              placeholder="Buscar por nombre, email o institución..."
+              placeholder="Buscar por nombre, email, institución o asunto de correo..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="input pl-10"
