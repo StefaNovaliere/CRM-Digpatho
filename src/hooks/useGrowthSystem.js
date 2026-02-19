@@ -204,6 +204,7 @@ export const useGrowthSystem = () => {
           lead.email ? `Email: ${lead.email}` : null,
           lead.geo ? `Geo: ${lead.geo}` : null,
           `LinkedIn: ${lead.linkedin_url}`,
+          lead.extra_data?.description ? `Descripción: ${lead.extra_data.description}` : null,
           `Descubierto por Growth System el ${new Date(lead.created_at).toLocaleDateString()}`
         ].filter(Boolean).join('\n'),
       };
@@ -229,6 +230,35 @@ export const useGrowthSystem = () => {
   const ignoreLead = useCallback(async (leadId) => {
     return updateLeadStatus(leadId, 'ignored');
   }, [updateLeadStatus]);
+
+  // Update lead fields (for editing in detail modal)
+  const updateLead = useCallback(async (leadId, fields) => {
+    try {
+      const allowedFields = ['full_name', 'first_name', 'last_name', 'job_title', 'company', 'email', 'geo', 'extra_data'];
+      const updates = { updated_at: new Date().toISOString() };
+      for (const key of allowedFields) {
+        if (fields[key] !== undefined) {
+          updates[key] = fields[key];
+        }
+      }
+
+      const { error: updateErr } = await supabase
+        .from('growth_leads')
+        .update(updates)
+        .eq('id', leadId);
+
+      if (updateErr) throw updateErr;
+
+      setLeads(prev => prev.map(l =>
+        l.id === leadId ? { ...l, ...updates } : l
+      ));
+      return true;
+    } catch (err) {
+      console.error('Error updating lead:', err);
+      setError(err.message);
+      return false;
+    }
+  }, []);
 
   // ========================================
   // PIPELINE EXECUTION
@@ -272,6 +302,7 @@ export const useGrowthSystem = () => {
     loadStats,
     updateDraftStatus,
     updateLeadStatus,
+    updateLead,
     promoteLeadToContact,
     ignoreLead,
     runPipeline,

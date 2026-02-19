@@ -1117,6 +1117,7 @@ class SafeSearcher:
                     "vertical": vertical,
                     "source_query": query,
                     "geo": geo,
+                    "description": snippet,
                 }
                 leads_found.append(lead)
                 logger.info(
@@ -1317,7 +1318,7 @@ class LeadManager:
                 "source_query": lead.get("source_query"),
                 "geo": lead.get("geo"),
                 "status": "new",
-                "extra_data": {},
+                "extra_data": {"description": lead.get("description", "")},
             }
 
             if self.dry_run:

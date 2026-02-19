@@ -35,6 +35,7 @@ import {
 } from 'lucide-react';
 import { useGrowthSystem } from '../hooks/useGrowthSystem';
 import { DraftReviewModal } from '../components/growth/DraftReviewModal';
+import { LeadDetailModal } from '../components/growth/LeadDetailModal';
 import { GROWTH_VERTICALS, GROWTH_LEAD_STATUSES, GROWTH_DRAFT_STATUSES } from '../config/constants';
 
 // ========================================
@@ -122,7 +123,7 @@ export const GrowthSystem = () => {
   const {
     leads, drafts, stats, loading, error,
     loadLeads, loadDrafts, loadStats,
-    updateDraftStatus, promoteLeadToContact, ignoreLead,
+    updateDraftStatus, updateLead, promoteLeadToContact, ignoreLead,
     runPipeline, pipelineRunning, pipelineResult, setPipelineResult
   } = useGrowthSystem();
 
@@ -130,6 +131,7 @@ export const GrowthSystem = () => {
   const [selectedVertical, setSelectedVertical] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDraft, setSelectedDraft] = useState(null);
+  const [selectedLead, setSelectedLead] = useState(null);
   const [promoting, setPromoting] = useState(null); // leadId being promoted
   const [showModeMenu, setShowModeMenu] = useState(null); // vertical key or null
 
@@ -492,18 +494,19 @@ export const GrowthSystem = () => {
                 {leads.map((lead) => (
                   <div
                     key={lead.id}
-                    className="px-6 py-4 hover:bg-gray-50 transition-colors"
+                    className="px-6 py-4 hover:bg-gray-50 transition-colors cursor-pointer"
+                    onClick={() => setSelectedLead(lead)}
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2.5 mb-1">
-                          <h3 className="font-medium text-gray-900 truncate">
+                          <h3 className="font-medium text-gray-900">
                             {lead.full_name || '[Sin nombre]'}
                           </h3>
                           <VerticalBadge vertical={lead.vertical} />
                           <StatusBadge status={lead.status} type="lead" />
                         </div>
-                        <div className="flex items-center gap-3 text-sm text-gray-500">
+                        <div className="flex items-center gap-3 text-sm text-gray-500 flex-wrap">
                           {lead.job_title && (
                             <span className="flex items-center gap-1">
                               <Briefcase size={13} />
@@ -533,6 +536,12 @@ export const GrowthSystem = () => {
                             </a>
                           )}
                         </div>
+                        {/* Description from Google snippet */}
+                        {lead.extra_data?.description && (
+                          <p className="mt-1.5 text-sm text-gray-500 leading-relaxed">
+                            {lead.extra_data.description}
+                          </p>
+                        )}
                       </div>
 
                       <div className="flex items-center gap-2 ml-4">
@@ -544,6 +553,7 @@ export const GrowthSystem = () => {
                             rel="noopener noreferrer"
                             className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                             title="Ver LinkedIn"
+                            onClick={(e) => e.stopPropagation()}
                           >
                             <ExternalLink size={16} />
                           </a>
@@ -552,7 +562,7 @@ export const GrowthSystem = () => {
                         {/* Promote to CRM */}
                         {lead.status !== 'promoted' && lead.status !== 'ignored' && (
                           <button
-                            onClick={() => handlePromote(lead)}
+                            onClick={(e) => { e.stopPropagation(); handlePromote(lead); }}
                             disabled={promoting === lead.id}
                             className="p-2 text-green-600 hover:text-green-700 hover:bg-green-50 rounded-lg transition-colors disabled:opacity-50"
                             title="Promover a Contacto CRM"
@@ -568,7 +578,7 @@ export const GrowthSystem = () => {
                         {/* Ignore */}
                         {lead.status !== 'promoted' && lead.status !== 'ignored' && (
                           <button
-                            onClick={() => handleIgnore(lead.id)}
+                            onClick={(e) => { e.stopPropagation(); handleIgnore(lead.id); }}
                             className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                             title="Descartar lead"
                           >
@@ -659,6 +669,38 @@ export const GrowthSystem = () => {
           </>
         )}
       </div>
+
+      {/* Lead Detail Modal */}
+      {selectedLead && (
+        <LeadDetailModal
+          lead={selectedLead}
+          onClose={() => setSelectedLead(null)}
+          onSave={async (updatedLead) => {
+            const ok = await updateLead(updatedLead.id, updatedLead);
+            if (ok) {
+              setSelectedLead(null);
+              const v = selectedVertical === 'all' ? null : selectedVertical;
+              loadLeads({ vertical: v, search: searchQuery || null });
+            }
+          }}
+          onPromote={async (lead) => {
+            const contact = await promoteLeadToContact(lead);
+            if (contact) {
+              setSelectedLead(null);
+              loadStats();
+              const v = selectedVertical === 'all' ? null : selectedVertical;
+              loadLeads({ vertical: v, search: searchQuery || null });
+            }
+          }}
+          onIgnore={async (leadId) => {
+            await ignoreLead(leadId);
+            setSelectedLead(null);
+            loadStats();
+            const v = selectedVertical === 'all' ? null : selectedVertical;
+            loadLeads({ vertical: v, search: searchQuery || null });
+          }}
+        />
+      )}
 
       {/* Draft Review Modal */}
       {selectedDraft && (
