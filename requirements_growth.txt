@@ -1,0 +1,17 @@
+# =============================================================
+# Digpatho AI Growth System — Python Dependencies
+# =============================================================
+# Install: pip install -r requirements_growth.txt
+#
+# These are ADDITIONAL dependencies for the Python growth system.
+# The main CRM app (React + Supabase) uses npm/package.json.
+# =============================================================
+
+# Google Dorking for LinkedIn prospect discovery
+googlesearch-python>=1.2.0
+
+# Supabase Python client (connects to the same DB as the React app)
+supabase>=2.0.0
+
+# Environment variable loading from .env.local / .env
+python-dotenv>=1.0.0
