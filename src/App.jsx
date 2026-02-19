@@ -13,7 +13,8 @@ import { Contacts } from './pages/Contacts';
 import { ContactDetail } from './pages/ContactDetail';
 import { Institutions } from './pages/Institutions';
 import { Settings } from './pages/Settings';
-import { BulkEmail } from './pages/BulkEmail'; // NUEVO
+import { BulkEmail } from './pages/BulkEmail';
+import { GrowthSystem } from './pages/GrowthSystem';
 
 function App() {
   return (
@@ -35,7 +36,8 @@ function App() {
           <Route path="/contacts/:id" element={<ContactDetail />} />
           <Route path="/institutions" element={<Institutions />} />
           <Route path="/settings" element={<Settings />} />
-          <Route path="/bulk-email" element={<BulkEmail />} /> {/* NUEVO */}
+          <Route path="/bulk-email" element={<BulkEmail />} />
+          <Route path="/growth" element={<GrowthSystem />} />
         </Route>
 
         {/* Redirects */}

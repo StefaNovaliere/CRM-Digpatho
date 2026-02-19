@@ -1,0 +1,245 @@
+// src/hooks/useGrowthSystem.js
+// Hook para acceder a las tablas growth_leads y growth_email_drafts
+// generadas por el pipeline Python ai_growth_system.py
+
+import { useState, useCallback } from 'react';
+import { supabase } from '../lib/supabase';
+
+export const useGrowthSystem = () => {
+  const [leads, setLeads] = useState([]);
+  const [drafts, setDrafts] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [stats, setStats] = useState({
+    totalLeads: 0,
+    newLeads: 0,
+    withDrafts: 0,
+    promoted: 0,
+    pendingDrafts: 0,
+    approvedDrafts: 0,
+    byVertical: {}
+  });
+
+  // ========================================
+  // LEADS
+  // ========================================
+  const loadLeads = useCallback(async (filters = {}) => {
+    setLoading(true);
+    setError(null);
+    try {
+      let query = supabase
+        .from('growth_leads')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (filters.vertical && filters.vertical !== 'all') {
+        query = query.eq('vertical', filters.vertical);
+      }
+      if (filters.status) {
+        query = query.eq('status', filters.status);
+      }
+      if (filters.search) {
+        query = query.or(
+          `full_name.ilike.%${filters.search}%,company.ilike.%${filters.search}%,job_title.ilike.%${filters.search}%`
+        );
+      }
+
+      const { data, error: fetchError } = await query;
+      if (fetchError) throw fetchError;
+      setLeads(data || []);
+      return data || [];
+    } catch (err) {
+      console.error('Error loading growth leads:', err);
+      setError(err.message);
+      return [];
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const loadStats = useCallback(async () => {
+    try {
+      // Leads stats
+      const { data: allLeads, error: leadsErr } = await supabase
+        .from('growth_leads')
+        .select('id, vertical, status');
+      if (leadsErr) throw leadsErr;
+
+      // Drafts stats
+      const { data: allDrafts, error: draftsErr } = await supabase
+        .from('growth_email_drafts')
+        .select('id, vertical, status');
+      if (draftsErr) throw draftsErr;
+
+      const leads = allLeads || [];
+      const drafts = allDrafts || [];
+
+      const byVertical = {};
+      leads.forEach(l => {
+        if (!byVertical[l.vertical]) {
+          byVertical[l.vertical] = { leads: 0, new: 0, promoted: 0 };
+        }
+        byVertical[l.vertical].leads++;
+        if (l.status === 'new') byVertical[l.vertical].new++;
+        if (l.status === 'promoted') byVertical[l.vertical].promoted++;
+      });
+
+      setStats({
+        totalLeads: leads.length,
+        newLeads: leads.filter(l => l.status === 'new').length,
+        withDrafts: leads.filter(l => l.status === 'draft_generated').length,
+        promoted: leads.filter(l => l.status === 'promoted').length,
+        pendingDrafts: drafts.filter(d => d.status === 'draft_pending_review').length,
+        approvedDrafts: drafts.filter(d => d.status === 'approved').length,
+        byVertical
+      });
+    } catch (err) {
+      console.error('Error loading growth stats:', err);
+    }
+  }, []);
+
+  // ========================================
+  // DRAFTS
+  // ========================================
+  const loadDrafts = useCallback(async (filters = {}) => {
+    setLoading(true);
+    setError(null);
+    try {
+      let query = supabase
+        .from('growth_email_drafts')
+        .select('*, lead:growth_leads(*)')
+        .order('created_at', { ascending: false });
+
+      if (filters.vertical && filters.vertical !== 'all') {
+        query = query.eq('vertical', filters.vertical);
+      }
+      if (filters.status) {
+        query = query.eq('status', filters.status);
+      }
+
+      const { data, error: fetchError } = await query;
+      if (fetchError) throw fetchError;
+      setDrafts(data || []);
+      return data || [];
+    } catch (err) {
+      console.error('Error loading growth drafts:', err);
+      setError(err.message);
+      return [];
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const updateDraftStatus = useCallback(async (draftId, status, reviewerNotes = null) => {
+    try {
+      const updates = {
+        status,
+        reviewed_at: new Date().toISOString()
+      };
+      if (reviewerNotes !== null) {
+        updates.reviewer_notes = reviewerNotes;
+      }
+
+      const { error: updateErr } = await supabase
+        .from('growth_email_drafts')
+        .update(updates)
+        .eq('id', draftId);
+
+      if (updateErr) throw updateErr;
+
+      // Update local state
+      setDrafts(prev => prev.map(d =>
+        d.id === draftId ? { ...d, ...updates } : d
+      ));
+      return true;
+    } catch (err) {
+      console.error('Error updating draft:', err);
+      setError(err.message);
+      return false;
+    }
+  }, []);
+
+  // ========================================
+  // LEAD ACTIONS
+  // ========================================
+  const updateLeadStatus = useCallback(async (leadId, status) => {
+    try {
+      const { error: updateErr } = await supabase
+        .from('growth_leads')
+        .update({
+          status,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', leadId);
+
+      if (updateErr) throw updateErr;
+
+      setLeads(prev => prev.map(l =>
+        l.id === leadId ? { ...l, status } : l
+      ));
+      return true;
+    } catch (err) {
+      console.error('Error updating lead:', err);
+      setError(err.message);
+      return false;
+    }
+  }, []);
+
+  // Promover lead a la tabla contacts del CRM
+  const promoteLeadToContact = useCallback(async (lead) => {
+    try {
+      const contactData = {
+        first_name: lead.first_name || lead.full_name?.split(' ')[0] || '',
+        last_name: lead.last_name || lead.full_name?.split(' ').slice(1).join(' ') || '',
+        job_title: lead.job_title || '',
+        interest_level: 'cold',
+        role: 'other',
+        source: `growth_system_${lead.vertical}`,
+        ai_context: [
+          `Vertical: ${lead.vertical}`,
+          lead.company ? `Empresa: ${lead.company}` : null,
+          lead.geo ? `Geo: ${lead.geo}` : null,
+          `LinkedIn: ${lead.linkedin_url}`,
+          `Descubierto por Growth System el ${new Date(lead.created_at).toLocaleDateString()}`
+        ].filter(Boolean).join('\n'),
+      };
+
+      const { data, error: insertErr } = await supabase
+        .from('contacts')
+        .insert(contactData)
+        .select()
+        .single();
+
+      if (insertErr) throw insertErr;
+
+      // Mark lead as promoted
+      await updateLeadStatus(lead.id, 'promoted');
+      return data;
+    } catch (err) {
+      console.error('Error promoting lead:', err);
+      setError(err.message);
+      return null;
+    }
+  }, [updateLeadStatus]);
+
+  const ignoreLead = useCallback(async (leadId) => {
+    return updateLeadStatus(leadId, 'ignored');
+  }, [updateLeadStatus]);
+
+  return {
+    leads,
+    drafts,
+    stats,
+    loading,
+    error,
+    loadLeads,
+    loadDrafts,
+    loadStats,
+    updateDraftStatus,
+    updateLeadStatus,
+    promoteLeadToContact,
+    ignoreLead,
+  };
+};
+
+export default useGrowthSystem;
