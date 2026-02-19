@@ -8,7 +8,8 @@ import {
   LogOut,
   Sparkles,
   Mail,
-  Send
+  Send,
+  Rocket
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useNavigate } from 'react-router-dom';
@@ -25,7 +26,8 @@ export const Sidebar = () => {
     { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
     { to: '/contacts', icon: Users, label: 'Contactos' },
     { to: '/institutions', icon: Building2, label: 'Instituciones' },
-    { to: '/bulk-email', icon: Send, label: 'Envío Masivo', isNew: true },
+    { to: '/bulk-email', icon: Send, label: 'Envío Masivo' },
+    { to: '/growth', icon: Rocket, label: 'Growth System', isNew: true },
   ];
 
   const secondaryNav = [

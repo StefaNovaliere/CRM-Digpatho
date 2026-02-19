@@ -166,6 +166,52 @@ export const EMAIL_TYPES = [
   { value: 're-engagement', label: 'Re-engagement', description: 'Retomar contacto después de tiempo' }
 ];
 
+// ============================
+// Growth System — Verticales GTM (Bull's-eye Framework)
+// ============================
+export const GROWTH_VERTICALS = {
+  DIRECT_B2B: {
+    value: 'DIRECT_B2B',
+    label: 'B2B Directo',
+    description: 'Laboratorios y centros de referencia',
+    color: 'blue',
+  },
+  PHARMA: {
+    value: 'PHARMA',
+    label: 'Pharma',
+    description: 'CDx y ensayos clínicos',
+    color: 'violet',
+  },
+  INFLUENCER: {
+    value: 'INFLUENCER',
+    label: 'Influencers',
+    description: 'Thought leadership y contenido',
+    color: 'amber',
+  },
+  EVENTS: {
+    value: 'EVENTS',
+    label: 'Eventos',
+    description: 'Conferencias y trade shows',
+    color: 'emerald',
+  }
+};
+
+// Estados de leads del Growth System
+export const GROWTH_LEAD_STATUSES = {
+  new: { value: 'new', label: 'Nuevo', color: 'blue' },
+  draft_generated: { value: 'draft_generated', label: 'Con borrador', color: 'violet' },
+  promoted: { value: 'promoted', label: 'Promovido', color: 'green' },
+  ignored: { value: 'ignored', label: 'Descartado', color: 'gray' }
+};
+
+// Estados de borradores del Growth System
+export const GROWTH_DRAFT_STATUSES = {
+  draft_pending_review: { value: 'draft_pending_review', label: 'Pendiente', color: 'amber' },
+  approved: { value: 'approved', label: 'Aprobado', color: 'green' },
+  rejected: { value: 'rejected', label: 'Rechazado', color: 'red' },
+  sent: { value: 'sent', label: 'Enviado', color: 'blue' }
+};
+
 export default {
   INTEREST_LEVELS,
   CONTACT_ROLES,
@@ -175,5 +221,8 @@ export default {
   COUNTRIES,
   APP_CONFIG,
   AI_MODELS,
-  EMAIL_TYPES
+  EMAIL_TYPES,
+  GROWTH_VERTICALS,
+  GROWTH_LEAD_STATUSES,
+  GROWTH_DRAFT_STATUSES
 };
