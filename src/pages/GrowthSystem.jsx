@@ -31,10 +31,13 @@ import {
   X,
   Briefcase,
   Globe,
-  AtSign
+  AtSign,
+  Pencil,
+  Send
 } from 'lucide-react';
 import { useGrowthSystem } from '../hooks/useGrowthSystem';
 import { DraftReviewModal } from '../components/growth/DraftReviewModal';
+import { LeadEditModal } from '../components/growth/LeadEditModal';
 import { GROWTH_VERTICALS, GROWTH_LEAD_STATUSES, GROWTH_DRAFT_STATUSES } from '../config/constants';
 
 // ========================================
@@ -122,7 +125,8 @@ export const GrowthSystem = () => {
   const {
     leads, drafts, stats, loading, error,
     loadLeads, loadDrafts, loadStats,
-    updateDraftStatus, promoteLeadToContact, ignoreLead,
+    updateDraftStatus, updateLead, promoteLeadToContact, ignoreLead,
+    sendApprovedToCampaign,
     runPipeline, pipelineRunning, pipelineResult, setPipelineResult
   } = useGrowthSystem();
 
@@ -130,8 +134,11 @@ export const GrowthSystem = () => {
   const [selectedVertical, setSelectedVertical] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDraft, setSelectedDraft] = useState(null);
+  const [editingLead, setEditingLead] = useState(null);
   const [promoting, setPromoting] = useState(null); // leadId being promoted
   const [showModeMenu, setShowModeMenu] = useState(null); // vertical key or null
+  const [campaignLoading, setCampaignLoading] = useState(false);
+  const [campaignResult, setCampaignResult] = useState(null);
 
   // Pipeline execution
   const handleRunPipeline = async (vertical, mode) => {
@@ -204,8 +211,41 @@ export const GrowthSystem = () => {
     loadStats();
   };
 
+  // Lead edit
+  const handleSaveLead = async (leadId, updates) => {
+    const ok = await updateLead(leadId, updates);
+    if (ok) {
+      setEditingLead(null);
+      loadStats();
+    }
+  };
+
+  // Send approved drafts to campaign
+  const handleSendToCampaign = async () => {
+    const approved = drafts.filter(d => d.status === 'approved');
+    if (approved.length === 0) return;
+
+    const name = `Growth System — ${new Date().toLocaleDateString('es-AR')}`;
+    setCampaignLoading(true);
+    setCampaignResult(null);
+    const result = await sendApprovedToCampaign(approved, name);
+    setCampaignLoading(false);
+
+    if (result.error) {
+      setCampaignResult({ type: 'error', message: result.error });
+    } else {
+      setCampaignResult({
+        type: 'success',
+        message: `Campaña creada con ${result.queued} emails. Andá a Envío Masivo para enviarla.`,
+      });
+      loadDrafts({ vertical: selectedVertical === 'all' ? null : selectedVertical });
+      loadStats();
+    }
+  };
+
   // Filter drafts for display
   const pendingDrafts = drafts.filter(d => d.status === 'draft_pending_review');
+  const approvedDrafts = drafts.filter(d => d.status === 'approved');
 
   return (
     <div className="p-6 max-w-7xl mx-auto animate-fade-in">
@@ -496,29 +536,29 @@ export const GrowthSystem = () => {
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2.5 mb-1">
-                          <h3 className="font-medium text-gray-900 truncate">
+                        <div className="flex items-center gap-2.5 mb-1 flex-wrap">
+                          <h3 className="font-medium text-gray-900">
                             {lead.full_name || '[Sin nombre]'}
                           </h3>
                           <VerticalBadge vertical={lead.vertical} />
                           <StatusBadge status={lead.status} type="lead" />
                         </div>
-                        <div className="flex items-center gap-3 text-sm text-gray-500">
+                        <div className="flex items-center gap-3 text-sm text-gray-500 flex-wrap">
                           {lead.job_title && (
                             <span className="flex items-center gap-1">
-                              <Briefcase size={13} />
+                              <Briefcase size={13} className="flex-shrink-0" />
                               {lead.job_title}
                             </span>
                           )}
                           {lead.company && (
                             <span className="flex items-center gap-1">
-                              <Building2 size={13} />
+                              <Building2 size={13} className="flex-shrink-0" />
                               {lead.company}
                             </span>
                           )}
                           {lead.geo && (
                             <span className="flex items-center gap-1">
-                              <Globe size={13} />
+                              <Globe size={13} className="flex-shrink-0" />
                               {lead.geo}
                             </span>
                           )}
@@ -528,7 +568,7 @@ export const GrowthSystem = () => {
                               className="flex items-center gap-1 text-blue-600 hover:text-blue-700 hover:underline"
                               onClick={(e) => e.stopPropagation()}
                             >
-                              <AtSign size={13} />
+                              <AtSign size={13} className="flex-shrink-0" />
                               {lead.email}
                             </a>
                           )}
@@ -536,6 +576,15 @@ export const GrowthSystem = () => {
                       </div>
 
                       <div className="flex items-center gap-2 ml-4">
+                        {/* Edit Lead */}
+                        <button
+                          onClick={() => setEditingLead(lead)}
+                          className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                          title="Editar lead"
+                        >
+                          <Pencil size={16} />
+                        </button>
+
                         {/* LinkedIn */}
                         {lead.linkedin_url && (
                           <a
@@ -591,10 +640,47 @@ export const GrowthSystem = () => {
               <h2 className="font-semibold text-gray-900">
                 Borradores de Email
                 <span className="ml-2 text-sm font-normal text-gray-500">
-                  ({pendingDrafts.length} pendientes de revisión)
+                  ({pendingDrafts.length} pendientes | {approvedDrafts.length} aprobados)
                 </span>
               </h2>
+              {approvedDrafts.length > 0 && (
+                <button
+                  onClick={handleSendToCampaign}
+                  disabled={campaignLoading}
+                  className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-white bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 rounded-lg transition-colors shadow-sm disabled:opacity-50"
+                >
+                  <Send size={16} />
+                  {campaignLoading ? 'Creando campaña...' : `Enviar ${approvedDrafts.length} a Campaña`}
+                </button>
+              )}
             </div>
+
+            {/* Campaign result banner */}
+            {campaignResult && (
+              <div className={`mx-6 mt-4 p-4 rounded-xl flex items-start gap-3 ${
+                campaignResult.type === 'success'
+                  ? 'bg-emerald-50 border border-emerald-200'
+                  : 'bg-red-50 border border-red-200'
+              }`}>
+                {campaignResult.type === 'success'
+                  ? <CheckCircle className="w-5 h-5 text-emerald-500 flex-shrink-0 mt-0.5" />
+                  : <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+                }
+                <p className={`text-sm font-medium ${
+                  campaignResult.type === 'success' ? 'text-emerald-800' : 'text-red-800'
+                }`}>
+                  {campaignResult.message}
+                </p>
+                <button
+                  onClick={() => setCampaignResult(null)}
+                  className={`ml-auto p-1 ${
+                    campaignResult.type === 'success' ? 'text-emerald-400 hover:text-emerald-600' : 'text-red-400 hover:text-red-600'
+                  }`}
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            )}
 
             {loading ? (
               <div className="p-12 text-center">
@@ -667,6 +753,15 @@ export const GrowthSystem = () => {
           onClose={() => setSelectedDraft(null)}
           onApprove={handleApproveDraft}
           onReject={handleRejectDraft}
+        />
+      )}
+
+      {/* Lead Edit Modal */}
+      {editingLead && (
+        <LeadEditModal
+          lead={editingLead}
+          onClose={() => setEditingLead(null)}
+          onSave={handleSaveLead}
         />
       )}
     </div>

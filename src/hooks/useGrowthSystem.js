@@ -190,11 +190,35 @@ export const useGrowthSystem = () => {
   // Promover lead a la tabla contacts del CRM
   const promoteLeadToContact = useCallback(async (lead) => {
     try {
+      // Create or find institution from company name
+      let institutionId = null;
+      if (lead.company) {
+        const { data: existingInst } = await supabase
+          .from('institutions')
+          .select('id')
+          .ilike('name', lead.company.trim())
+          .maybeSingle();
+
+        if (existingInst) {
+          institutionId = existingInst.id;
+        } else {
+          const { data: newInst } = await supabase
+            .from('institutions')
+            .insert({ name: lead.company.trim() })
+            .select()
+            .single();
+          institutionId = newInst?.id || null;
+        }
+      }
+
       const contactData = {
         first_name: lead.first_name || lead.full_name?.split(' ')[0] || '',
         last_name: lead.last_name || lead.full_name?.split(' ').slice(1).join(' ') || '',
-        email: lead.email || '',
+        email: lead.email || null,
         job_title: lead.job_title || '',
+        linkedin_url: lead.linkedin_url || null,
+        country: lead.geo || null,
+        institution_id: institutionId,
         interest_level: 'cold',
         role: 'other',
         source: `growth_system_${lead.vertical}`,
@@ -226,9 +250,133 @@ export const useGrowthSystem = () => {
     }
   }, [updateLeadStatus]);
 
+  const updateLead = useCallback(async (leadId, updates) => {
+    try {
+      const { error: updateErr } = await supabase
+        .from('growth_leads')
+        .update({
+          ...updates,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', leadId);
+
+      if (updateErr) throw updateErr;
+
+      setLeads(prev => prev.map(l =>
+        l.id === leadId ? { ...l, ...updates } : l
+      ));
+      return true;
+    } catch (err) {
+      console.error('Error updating lead:', err);
+      setError(err.message);
+      return false;
+    }
+  }, []);
+
   const ignoreLead = useCallback(async (leadId) => {
     return updateLeadStatus(leadId, 'ignored');
   }, [updateLeadStatus]);
+
+  // Send approved drafts to a bulk email campaign
+  const sendApprovedToCampaign = useCallback(async (approvedDrafts, campaignName) => {
+    try {
+      // 1. Create the campaign
+      const { data: campaign, error: campErr } = await supabase
+        .from('bulk_email_campaigns')
+        .insert({
+          name: campaignName,
+          status: 'ready',
+          total_emails: approvedDrafts.length,
+          sent_count: 0,
+          failed_count: 0,
+        })
+        .select()
+        .single();
+
+      if (campErr) throw campErr;
+
+      // 2. Build queue items from approved drafts
+      const queueItems = [];
+      for (const draft of approvedDrafts) {
+        const lead = draft.lead || {};
+        if (!lead.email) continue; // Skip leads without email
+
+        // Check if contact exists, create if not
+        let contactId = null;
+        const { data: existingContact } = await supabase
+          .from('contacts')
+          .select('id')
+          .eq('email', lead.email)
+          .maybeSingle();
+
+        contactId = existingContact?.id;
+
+        if (!contactId && lead.full_name) {
+          const firstName = lead.first_name || lead.full_name?.split(' ')[0] || '';
+          const lastName = lead.last_name || lead.full_name?.split(' ').slice(1).join(' ') || '';
+          const { data: newContact } = await supabase
+            .from('contacts')
+            .insert({
+              first_name: firstName,
+              last_name: lastName,
+              email: lead.email,
+              job_title: lead.job_title || null,
+              linkedin_url: lead.linkedin_url || null,
+              interest_level: 'cold',
+              source: `growth_system_${lead.vertical || 'unknown'}`,
+            })
+            .select()
+            .single();
+          contactId = newContact?.id;
+        }
+
+        queueItems.push({
+          campaign_id: campaign.id,
+          contact_id: contactId,
+          to_email: lead.email,
+          to_name: lead.full_name || '',
+          subject: draft.subject,
+          body: draft.body,
+          status: 'pending',
+        });
+      }
+
+      if (queueItems.length === 0) {
+        // No emails to send — delete empty campaign
+        await supabase.from('bulk_email_campaigns').delete().eq('id', campaign.id);
+        return { error: 'Ningún borrador aprobado tiene un lead con email. Agregá emails a los leads primero.' };
+      }
+
+      // 3. Insert queue items
+      const { error: queueErr } = await supabase
+        .from('bulk_email_queue')
+        .insert(queueItems);
+
+      if (queueErr) throw queueErr;
+
+      // 4. Update campaign total
+      await supabase
+        .from('bulk_email_campaigns')
+        .update({ total_emails: queueItems.length })
+        .eq('id', campaign.id);
+
+      // 5. Mark drafts as 'sent' status
+      for (const draft of approvedDrafts) {
+        if (draft.lead?.email) {
+          await supabase
+            .from('growth_email_drafts')
+            .update({ status: 'sent' })
+            .eq('id', draft.id);
+        }
+      }
+
+      return { campaign, queued: queueItems.length };
+    } catch (err) {
+      console.error('Error creating campaign from drafts:', err);
+      setError(err.message);
+      return { error: err.message };
+    }
+  }, []);
 
   // ========================================
   // PIPELINE EXECUTION
@@ -272,8 +420,10 @@ export const useGrowthSystem = () => {
     loadStats,
     updateDraftStatus,
     updateLeadStatus,
+    updateLead,
     promoteLeadToContact,
     ignoreLead,
+    sendApprovedToCampaign,
     runPipeline,
     pipelineRunning,
     pipelineResult,
