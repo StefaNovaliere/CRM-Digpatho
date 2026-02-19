@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS growth_leads (
     last_name       TEXT,
     job_title       TEXT,
     company         TEXT,
+    email           TEXT,
     linkedin_url    TEXT UNIQUE NOT NULL,
     vertical        TEXT NOT NULL
                         CHECK (vertical IN ('DIRECT_B2B', 'PHARMA', 'INFLUENCER', 'EVENTS')),
@@ -49,6 +50,10 @@ CREATE INDEX IF NOT EXISTS idx_growth_leads_vertical
 -- Filter by status (for finding new leads without drafts)
 CREATE INDEX IF NOT EXISTS idx_growth_leads_status
     ON growth_leads(status);
+
+-- Index on email (for lookups)
+CREATE INDEX IF NOT EXISTS idx_growth_leads_email
+    ON growth_leads(email) WHERE email IS NOT NULL;
 
 
 -- =========================

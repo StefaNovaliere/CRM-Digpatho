@@ -148,6 +148,24 @@ function inferNameFromSlug(slug) {
   return nameParts.map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' ') || slug;
 }
 
+function extractEmailsFromText(text) {
+  if (!text) return [];
+  const pattern = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g;
+  const emails = text.match(pattern) || [];
+  const blockedDomains = new Set(['example.com', 'email.com', 'test.com', 'sentry.io', 'linkedin.com']);
+  const blockedExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp'];
+  return [...new Set(
+    emails
+      .map(e => e.toLowerCase())
+      .filter(e => {
+        const domain = e.split('@')[1] || '';
+        if (blockedDomains.has(domain)) return false;
+        if (blockedExtensions.some(ext => e.endsWith(ext))) return false;
+        return true;
+      })
+  )];
+}
+
 function inferGeoFromQuery(query) {
   const geoMap = {
     Argentina: 'Argentina', Brazil: 'Brazil', Brasil: 'Brazil',
@@ -228,11 +246,14 @@ async function searchVertical(vertical) {
 
         const { name, jobTitle, company } = parseLinkedInTitle(result.title || '');
         const geo = inferGeoFromQuery(query);
+        const snippet = result.snippet || result.description || '';
+        const foundEmails = extractEmailsFromText(`${result.title || ''} ${snippet}`);
 
         allLeads.push({
           full_name: name || inferNameFromSlug(slug),
           job_title: jobTitle,
           company: company,
+          email: foundEmails.length > 0 ? foundEmails[0] : null,
           linkedin_url: `https://www.linkedin.com/in/${slug}`,
           vertical,
           source_query: query,
@@ -281,6 +302,7 @@ async function processLeads(supabase, rawLeads) {
       last_name: lastName,
       job_title: lead.job_title,
       company: lead.company,
+      email: lead.email || null,
       linkedin_url: linkedinUrl,
       vertical: lead.vertical,
       source_query: lead.source_query,
@@ -342,6 +364,7 @@ async function generateDrafts(supabase, leads, vertical) {
         lead_name: lead.full_name,
         lead_company: lead.company,
         lead_job_title: lead.job_title,
+        lead_email: lead.email,
         lead_linkedin: lead.linkedin_url,
         lead_geo: lead.geo,
         vertical_config: config?.display_name,

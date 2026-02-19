@@ -840,6 +840,56 @@ def infer_geo_from_query(query: str) -> Optional[str]:
     return None
 
 
+def extract_emails_from_text(text: str) -> List[str]:
+    """Extract email addresses from a text string (search snippet, title, etc.)."""
+    if not text:
+        return []
+    # Standard email regex — catches most valid emails
+    pattern = r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}"
+    emails = re.findall(pattern, text)
+    # Filter out obvious junk (image files, example domains, etc.)
+    blocked_domains = {"example.com", "email.com", "test.com", "sentry.io", "linkedin.com"}
+    blocked_extensions = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"}
+    clean = []
+    for email in emails:
+        email_lower = email.lower()
+        domain = email_lower.split("@")[1] if "@" in email_lower else ""
+        if domain in blocked_domains:
+            continue
+        if any(email_lower.endswith(ext) for ext in blocked_extensions):
+            continue
+        clean.append(email_lower)
+    return list(set(clean))
+
+
+def build_email_search_queries(name: str, company: Optional[str]) -> List[str]:
+    """
+    Build Google Dorking queries to find a person's email address.
+
+    Uses name + company to search for publicly available email addresses
+    on institutional pages, conference programs, publications, etc.
+    """
+    queries = []
+    if not name or name in ("[NOMBRE]", ""):
+        return queries
+
+    # Clean name for search
+    clean_name = name.strip().strip('"')
+
+    # Query 1: Direct email search with name
+    queries.append(f'"{clean_name}" email OR correo OR mailto')
+
+    # Query 2: Name + company + email pattern
+    if company and company not in ("[EMPRESA]", ""):
+        clean_company = company.strip().strip('"')
+        queries.append(f'"{clean_name}" "{clean_company}" email OR @')
+
+    # Query 3: Search in academic/institutional contexts
+    queries.append(f'"{clean_name}" pathology OR patología "@" site:researchgate.net OR site:scholar.google.com OR site:orcid.org')
+
+    return queries
+
+
 def determine_language(geo: Optional[str]) -> str:
     """Determine email language based on lead geography."""
     if not geo:
@@ -949,10 +999,17 @@ class SafeSearcher:
 
                 geo = infer_geo_from_query(query)
 
+                # Try to extract email from search snippet/description
+                snippet = result.get("description", "")
+                found_emails = extract_emails_from_text(
+                    f"{title} {snippet}"
+                )
+
                 lead = {
                     "full_name": name,
                     "job_title": job_title,
                     "company": company,
+                    "email": found_emails[0] if found_emails else None,
                     "linkedin_url": f"https://www.linkedin.com/in/{slug}",
                     "vertical": vertical,
                     "source_query": query,
@@ -986,6 +1043,50 @@ class SafeSearcher:
         )
         self.results.extend(leads_found)
         return leads_found
+
+    def search_email_for_lead(
+        self, name: str, company: Optional[str] = None
+    ) -> Optional[str]:
+        """
+        Try to find an email for a person via Google Dorking.
+
+        Runs targeted email-finding queries and returns the first
+        email found, or None if nothing found.
+        """
+        queries = build_email_search_queries(name, company)
+        if not queries:
+            return None
+
+        for query in queries:
+            if self.searches_done >= self.max_searches:
+                break
+
+            logger.info(
+                "[SafeSearcher] Email search for '%s': %.80s...",
+                name, query,
+            )
+            results = self._execute_search(query)
+            self.searches_done += 1
+
+            # Extract emails from all results
+            for result in results:
+                text = f"{result.get('title', '')} {result.get('description', '')}"
+                emails = extract_emails_from_text(text)
+                if emails:
+                    logger.info(
+                        "[SafeSearcher] Found email for %s: %s",
+                        name, emails[0],
+                    )
+                    return emails[0]
+
+            # Rate limit
+            if self.searches_done < self.max_searches:
+                delay = random.uniform(
+                    self.MIN_DELAY_SECONDS, self.MAX_DELAY_SECONDS
+                )
+                time.sleep(delay)
+
+        return None
 
     def search_all_verticals(self) -> List[Dict[str, Any]]:
         """Execute searches across all verticals."""
@@ -1107,6 +1208,7 @@ class LeadManager:
                 "last_name": last_name,
                 "job_title": lead.get("job_title"),
                 "company": lead.get("company"),
+                "email": lead.get("email"),
                 "linkedin_url": linkedin_url,
                 "vertical": lead.get("vertical", "DIRECT_B2B"),
                 "source_query": lead.get("source_query"),
@@ -1198,6 +1300,46 @@ class LeadManager:
         except Exception as exc:
             logger.error(
                 "[LeadManager] Error updating lead %s: %s", lead_id, exc
+            )
+
+    def get_leads_without_email(
+        self, vertical: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Fetch leads that don't have an email yet."""
+        if self.dry_run and not self.db:
+            return []
+        try:
+            query = (
+                self.db.table("growth_leads")
+                .select("*")
+                .is_("email", "null")
+                .neq("status", "ignored")
+            )
+            if vertical:
+                query = query.eq("vertical", vertical)
+
+            result = query.order("created_at", desc=False).execute()
+            return result.data or []
+        except Exception as exc:
+            logger.error("[LeadManager] Error fetching leads without email: %s", exc)
+            return []
+
+    def update_lead_email(self, lead_id: str, email: str) -> None:
+        """Update a lead's email address."""
+        if self.dry_run:
+            logger.info(
+                "[LeadManager][DRY-RUN] Would set email for %s → %s",
+                lead_id, email,
+            )
+            return
+        try:
+            self.db.table("growth_leads").update(
+                {"email": email, "updated_at": datetime.now(timezone.utc).isoformat()}
+            ).eq("id", lead_id).execute()
+            logger.info("[LeadManager] Email updated for lead %s: %s", lead_id, email)
+        except Exception as exc:
+            logger.error(
+                "[LeadManager] Error updating email for %s: %s", lead_id, exc
             )
 
     def _lead_exists(self, linkedin_url: str) -> bool:
@@ -1384,6 +1526,7 @@ class ContextualCopywriter:
                 "lead_name": lead.get("full_name"),
                 "lead_company": lead.get("company"),
                 "lead_job_title": lead.get("job_title"),
+                "lead_email": lead.get("email"),
                 "lead_linkedin": lead.get("linkedin_url"),
                 "lead_geo": lead.get("geo"),
                 "vertical_config": config["display_name"],
@@ -1687,6 +1830,7 @@ class GrowthPipeline:
             "dry_run": self.dry_run,
             "leads_found": 0,
             "leads_inserted": 0,
+            "leads_enriched": 0,
             "drafts_created": 0,
         }
 
@@ -1694,6 +1838,9 @@ class GrowthPipeline:
 
         if self.mode in ("search", "full"):
             results.update(self._run_search_phase(verticals))
+
+        if self.mode in ("enrich", "full"):
+            results.update(self._run_enrich_phase(verticals))
 
         if self.mode in ("draft", "full"):
             results.update(self._run_draft_phase(verticals))
@@ -1720,6 +1867,49 @@ class GrowthPipeline:
             total_inserted += len(inserted)
 
         return {"leads_found": total_found, "leads_inserted": total_inserted}
+
+    def _run_enrich_phase(
+        self, verticals: List[str]
+    ) -> Dict[str, int]:
+        """Find emails for existing leads that don't have one."""
+        logger.info("\n--- Phase: Email Enrichment ---")
+        total_enriched = 0
+
+        for v in verticals:
+            if self.searcher.searches_done >= self.max_searches:
+                break
+
+            leads = self.lead_manager.get_leads_without_email(vertical=v)
+            if not leads:
+                logger.info("[Pipeline] No leads without email in %s", v)
+                continue
+
+            logger.info(
+                "[Pipeline] Enriching %d leads in %s",
+                len(leads), v,
+            )
+
+            for lead in leads:
+                if self.searcher.searches_done >= self.max_searches:
+                    logger.warning(
+                        "[Pipeline] Max searches reached during enrichment"
+                    )
+                    break
+
+                name = lead.get("full_name")
+                company = lead.get("company")
+                if not name:
+                    continue
+
+                email = self.searcher.search_email_for_lead(name, company)
+                if email:
+                    self.lead_manager.update_lead_email(lead["id"], email)
+                    total_enriched += 1
+                    logger.info(
+                        "[Pipeline] Enriched: %s → %s", name, email,
+                    )
+
+        return {"leads_enriched": total_enriched}
 
     def _run_draft_phase(
         self, verticals: List[str]
@@ -1795,6 +1985,7 @@ class GrowthPipeline:
             "  Mode: %s | Vertical: %s | Dry-run: %s\n"
             "  Leads found:    %d\n"
             "  Leads inserted: %d\n"
+            "  Leads enriched (email): %d\n"
             "  Drafts created: %d\n"
             "  \n"
             "  All drafts saved with status='draft_pending_review'.\n"
@@ -1805,6 +1996,7 @@ class GrowthPipeline:
             results["dry_run"],
             results["leads_found"],
             results["leads_inserted"],
+            results.get("leads_enriched", 0),
             results["drafts_created"],
         )
 
@@ -1825,12 +2017,13 @@ def build_parser() -> argparse.ArgumentParser:
             "Examples:\n"
             "  %(prog)s --vertical PHARMA --mode search\n"
             "  %(prog)s --vertical DIRECT_B2B --mode draft\n"
+            "  %(prog)s --vertical all --mode enrich\n"
             "  %(prog)s --vertical all --mode full\n"
             "  %(prog)s --vertical all --mode full --dry-run\n"
             "\n"
             "Verticals: DIRECT_B2B, PHARMA, INFLUENCER, EVENTS, all\n"
-            "Modes:     search (find leads), draft (generate emails), "
-            "full (both)\n"
+            "Modes:     search (find leads), enrich (find emails for existing leads),\n"
+            "           draft (generate emails), full (search + enrich + draft)\n"
         ),
     )
     parser.add_argument(
@@ -1841,9 +2034,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--mode",
-        choices=["search", "draft", "full"],
+        choices=["search", "enrich", "draft", "full"],
         default="full",
-        help="Execution mode (default: full)",
+        help="Execution mode: search, enrich (find emails), draft, full (default: full)",
     )
     parser.add_argument(
         "--dry-run",

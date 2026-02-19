@@ -30,7 +30,8 @@ import {
   Zap,
   X,
   Briefcase,
-  Globe
+  Globe,
+  AtSign
 } from 'lucide-react';
 import { useGrowthSystem } from '../hooks/useGrowthSystem';
 import { DraftReviewModal } from '../components/growth/DraftReviewModal';
@@ -520,6 +521,16 @@ export const GrowthSystem = () => {
                               <Globe size={13} />
                               {lead.geo}
                             </span>
+                          )}
+                          {lead.email && (
+                            <a
+                              href={`mailto:${lead.email}`}
+                              className="flex items-center gap-1 text-blue-600 hover:text-blue-700 hover:underline"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <AtSign size={13} />
+                              {lead.email}
+                            </a>
                           )}
                         </div>
                       </div>
