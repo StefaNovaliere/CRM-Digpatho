@@ -22,9 +22,21 @@ const VERTICAL_CONFIGS = {
   DIRECT_B2B: {
     display_name: 'Direct B2B — Reference Centers & Labs',
     search_queries: [
+      // LatAm — English titles
       'site:linkedin.com/in "Medical Director" OR "Chief of Pathology" OR "Laboratory Director" pathology Argentina OR Brazil',
+      'site:linkedin.com/in "Head of Pathology" OR "Lab Director" OR "Pathology Manager" laboratory Argentina OR Brazil OR Colombia',
+      // LatAm — Spanish titles
       'site:linkedin.com/in "Director Médico" OR "Jefe de Patología" patología oncología Argentina OR Brasil',
+      'site:linkedin.com/in "Director de Laboratorio" OR "Jefe de Laboratorio" OR "Coordinador de Patología" diagnóstico Argentina OR Colombia OR México',
+      // LatAm — more countries
+      'site:linkedin.com/in "Medical Director" OR "Lab Director" OR "Director Médico" pathology Peru OR Chile OR Mexico OR Colombia',
+      'site:linkedin.com/in "Pathologist" OR "Patólogo" OR "Director" laboratory diagnosis Paraguay OR Uruguay OR Bolivia',
+      // Africa — English titles
       'site:linkedin.com/in "Head of Pathology" OR "Lab Director" diagnostic laboratory "South Africa" OR Nigeria',
+      'site:linkedin.com/in "Medical Director" OR "Chief Pathologist" OR "Laboratory Manager" Kenya OR Ghana OR Ethiopia OR Tanzania',
+      'site:linkedin.com/in "Pathologist" OR "Lab Director" OR "Histopathology" hospital "South Africa" OR "West Africa"',
+      // Reference institutions globally
+      'site:linkedin.com/in pathology OR histopathology "reference laboratory" OR "reference center" director OR manager',
     ],
     email_tone: 'Operational, ROI-driven.',
     email_cta: '15-minute demo call',
@@ -32,9 +44,24 @@ const VERTICAL_CONFIGS = {
   PHARMA: {
     display_name: 'Pharma Partnerships — CDx & Clinical Trials',
     search_queries: [
+      // Major pharma — AstraZeneca, Daiichi Sankyo (HER2 focus)
       'site:linkedin.com/in "Business Development" OR "Oncology Lead" OR "Clinical Trial Manager" AstraZeneca OR "Daiichi Sankyo" HER2 OR "digital pathology"',
+      // Roche, Novartis, Pfizer
+      'site:linkedin.com/in "Business Development" OR "Oncology" OR "Diagnostics" Roche OR Novartis OR Pfizer "companion diagnostic" OR "digital pathology"',
+      // More pharma: Merck, BMS, Lilly, Gilead
+      'site:linkedin.com/in "Oncology" OR "Clinical Development" OR "Biomarker" Merck OR "Bristol-Myers" OR Lilly OR Gilead pathology OR diagnostics',
+      // BioNTech, Sanofi, Bayer, J&J
+      'site:linkedin.com/in "Business Development" OR "R&D Director" BioNTech OR Sanofi OR Bayer OR "Johnson & Johnson" oncology OR CDx OR biomarker',
+      // CDx / companion diagnostic specialists
       'site:linkedin.com/in "R&D Director" OR "Biomarker" OR "Head of Companion Diagnostics" pharma oncology "companion diagnostic" OR CDx',
+      // MSL / clinical operations
       'site:linkedin.com/in "Medical Science Liaison" OR "Clinical Operations" oncology pharma "digital pathology" OR "AI diagnostics"',
+      // CROs and diagnostic partners
+      'site:linkedin.com/in "Clinical Trial" OR "Pathology Services" OR "Central Lab" ICON OR Covance OR LabCorp OR "Quest Diagnostics" oncology OR pathology',
+      // LatAm pharma divisions
+      'site:linkedin.com/in "Director Médico" OR "Medical Director" OR "Clinical Research" pharma oncology "Latin America" OR LATAM OR Argentina OR Brazil',
+      // Digital pathology / AI companies (potential partners)
+      'site:linkedin.com/in "Business Development" OR "Partnerships" "digital pathology" OR "computational pathology" OR "AI diagnostics" OR "precision medicine"',
     ],
     email_tone: 'Scientific-strategic.',
     email_cta: '30-minute technical briefing',
@@ -42,9 +69,22 @@ const VERTICAL_CONFIGS = {
   INFLUENCER: {
     display_name: 'Influencers & Thought Leadership',
     search_queries: [
+      // Digital pathology editors & authors
       'site:linkedin.com/in "Editor" OR "Founder" OR "Author" "digital pathology" OR "AI in healthcare" OR "computational pathology"',
+      // KOLs and speakers
       'site:linkedin.com/in "thought leader" OR "keynote speaker" OR "blogger" pathology AI oncology diagnostics',
+      // Podcast hosts & content creators
       'site:linkedin.com/in "podcast host" OR "content creator" "digital health" OR "health tech" OR "medtech" pathology',
+      // Journalists / health tech media
+      'site:linkedin.com/in "journalist" OR "reporter" OR "editor" "health tech" OR "medical technology" OR "digital health" AI OR diagnostics',
+      // Academic KOLs
+      'site:linkedin.com/in "Professor" OR "Researcher" "computational pathology" OR "digital pathology" OR "AI pathology" publications OR research',
+      // Newsletter / Substack / publication authors
+      'site:linkedin.com/in "newsletter" OR "Substack" OR "publication" "pathology" OR "diagnostics" OR "precision medicine" OR "healthcare AI"',
+      // Health tech investors & advisors
+      'site:linkedin.com/in "Venture" OR "Advisor" OR "Board Member" "digital pathology" OR "health tech" OR "medtech" oncology OR diagnostics',
+      // Industry analysts
+      'site:linkedin.com/in "Analyst" OR "Consultant" "digital pathology" OR "precision medicine" OR "AI healthcare" market OR trends',
     ],
     email_tone: 'Collaborative, peer-to-peer.',
     email_cta: 'Content collaboration call',
@@ -52,9 +92,21 @@ const VERTICAL_CONFIGS = {
   EVENTS: {
     display_name: 'Events & Conferences',
     search_queries: [
+      // USCAP
       'site:linkedin.com/in "Speaker" OR "Organizer" OR "Chair" "pathology congress" OR "oncology symposium" OR "USCAP" 2025 OR 2026',
+      // European Congress of Pathology
+      'site:linkedin.com/in "Speaker" OR "Panelist" "European Congress of Pathology" OR "ECP" OR "ESP" pathology 2025 OR 2026',
+      // Digital Pathology & AI conferences
       'site:linkedin.com/in "Program Director" OR "Scientific Committee" "digital pathology" OR "pathology conference"',
-      'site:linkedin.com/in "Speaker" OR "Panelist" "FIFARMA" OR "digital pathology congress" OR "European Congress of Pathology"',
+      'site:linkedin.com/in "Speaker" OR "Organizer" "Digital Pathology" OR "Computational Pathology" OR "PathVisions" conference OR congress',
+      // FIFARMA + LatAm conferences
+      'site:linkedin.com/in "Speaker" OR "Panelist" "FIFARMA" OR "digital pathology congress" OR "SLAPC" OR "congreso patología"',
+      // African conferences
+      'site:linkedin.com/in "Speaker" OR "Organizer" OR "Chair" "African" OR "Africa" pathology OR diagnostics conference OR congress OR symposium',
+      // Oncology summits
+      'site:linkedin.com/in "Speaker" OR "Chair" OR "Moderator" "oncology summit" OR "ASCO" OR "ESMO" OR "AACR" "digital pathology" OR biomarker OR diagnostics',
+      // Medtech / health tech conferences
+      'site:linkedin.com/in "Speaker" OR "Panelist" "medtech" OR "health tech" OR "HIMSS" AI OR "machine learning" diagnostics OR pathology',
     ],
     email_tone: 'Direct, concise, 5-7 lines max.',
     email_cta: '15-minute meeting at [EVENT]',
@@ -171,6 +223,9 @@ function inferGeoFromQuery(query) {
     Argentina: 'Argentina', Brazil: 'Brazil', Brasil: 'Brazil',
     'South Africa': 'South Africa', Nigeria: 'Nigeria',
     Paraguay: 'Paraguay', Uruguay: 'Uruguay', Bolivia: 'Bolivia', Peru: 'Peru',
+    Colombia: 'Colombia', México: 'Mexico', Mexico: 'Mexico', Chile: 'Chile',
+    Kenya: 'Kenya', Ghana: 'Ghana', Ethiopia: 'Ethiopia', Tanzania: 'Tanzania',
+    'West Africa': 'West Africa', LATAM: 'Latin America', 'Latin America': 'Latin America',
   };
   const lower = query.toLowerCase();
   for (const [keyword, geo] of Object.entries(geoMap)) {
@@ -183,7 +238,7 @@ function determineLanguage(geo) {
   if (!geo) return 'en';
   const lower = geo.toLowerCase();
   if (lower.includes('brazil') || lower.includes('brasil')) return 'pt';
-  const esCountries = ['argentina', 'paraguay', 'uruguay', 'bolivia', 'peru', 'mexico', 'colombia', 'chile'];
+  const esCountries = ['argentina', 'paraguay', 'uruguay', 'bolivia', 'peru', 'mexico', 'colombia', 'chile', 'latin america'];
   if (esCountries.some(c => lower.includes(c))) return 'es';
   return 'en';
 }
