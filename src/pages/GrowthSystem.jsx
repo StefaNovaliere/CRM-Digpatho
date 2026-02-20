@@ -557,6 +557,11 @@ export const GrowthSystem = () => {
                       {enrichmentResult.already_had_email > 0 && <span> {enrichmentResult.already_had_email} ya tenían email.</span>}
                       {enrichmentResult.errors > 0 && <span> {enrichmentResult.errors} errores.</span>}
                       {enrichmentResult.rateLimitedRemaining > 0 && <span className="text-amber-600"> {enrichmentResult.rateLimitedRemaining} pendientes (límite de API alcanzado).</span>}
+                      {enrichmentResult.rateLimitError && (
+                        <span className="block text-xs text-red-500 mt-1">
+                          Detalle API: {enrichmentResult.rateLimitError}
+                        </span>
+                      )}
                     </span>
                   )}
                 </div>

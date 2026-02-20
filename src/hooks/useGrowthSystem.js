@@ -432,11 +432,17 @@ export const useGrowthSystem = () => {
           }
         }
 
-        // Check if rate limited — stop processing further batches
-        const rateLimited = results.details?.some(d => d.status === 'rate_limited');
-        if (rateLimited) {
-          aggregated.rateLimitedRemaining = leadIds.length - (i + batch.length);
-          break;
+        // Check if rate limited — only stop if most of the batch was rate limited
+        const rateLimitedDetails = results.details?.filter(d => d.status === 'rate_limited') || [];
+        if (rateLimitedDetails.length > 0) {
+          const rateLimitDetail = rateLimitedDetails[0];
+          aggregated.rateLimitError = rateLimitDetail.apiError || null;
+
+          // Only stop all batches if the majority of this batch was rate limited
+          if (rateLimitedDetails.length >= batch.length) {
+            aggregated.rateLimitedRemaining = leadIds.length - (i + batch.length);
+            break;
+          }
         }
       }
 
