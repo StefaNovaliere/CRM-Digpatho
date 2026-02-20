@@ -23,7 +23,8 @@ import {
   AlertCircle,
   FileText,
   Pencil,
-  Save
+  Save,
+  Sparkles
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../hooks/useAuth';
@@ -36,7 +37,7 @@ const verticalColors = {
   EVENTS: 'from-emerald-500 to-teal-500',
 };
 
-export const DraftReviewModal = ({ draft, onClose, onApprove, onReject, onViewLead, onSaveDraft }) => {
+export const DraftReviewModal = ({ draft, onClose, onApprove, onReject, onViewLead, onSaveDraft, onRegenerate }) => {
   const { user } = useAuth();
   const [notes, setNotes] = useState(draft?.reviewer_notes || '');
   const [copied, setCopied] = useState(false);
@@ -44,6 +45,10 @@ export const DraftReviewModal = ({ draft, onClose, onApprove, onReject, onViewLe
   const [editSubject, setEditSubject] = useState(draft?.subject || '');
   const [editBody, setEditBody] = useState(draft?.body || '');
   const [saving, setSaving] = useState(false);
+
+  // Regeneration state
+  const [regenerating, setRegenerating] = useState(false);
+  const [regenerateError, setRegenerateError] = useState(null);
 
   // Campaign integration state
   const [showCampaignStep, setShowCampaignStep] = useState(false);
@@ -244,6 +249,28 @@ export const DraftReviewModal = ({ draft, onClose, onApprove, onReject, onViewLe
     setIsEditing(false);
   };
 
+  const handleRegenerate = async () => {
+    if (!onRegenerate) return;
+    setRegenerating(true);
+    setRegenerateError(null);
+    try {
+      const data = await onRegenerate(draft.id);
+      if (data?.success && data.result) {
+        const newSubject = data.result.subject || editSubject;
+        const newBody = data.result.body || editBody;
+        setEditSubject(newSubject);
+        setEditBody(newBody);
+        setIsEditing(true);
+      } else {
+        setRegenerateError('No se pudo regenerar el borrador.');
+      }
+    } catch (err) {
+      setRegenerateError(err.message || 'Error regenerando borrador');
+    } finally {
+      setRegenerating(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto">
       {/* Backdrop */}
@@ -355,36 +382,62 @@ export const DraftReviewModal = ({ draft, onClose, onApprove, onReject, onViewLe
                   )}
                 </div>
 
-                {/* Edit toggle */}
-                <div className="flex items-center justify-end">
-                  {!isEditing ? (
-                    <button
-                      onClick={() => setIsEditing(true)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-violet-600 bg-violet-50 hover:bg-violet-100 rounded-lg transition-colors"
-                    >
-                      <Pencil size={13} />
-                      Editar borrador
-                    </button>
-                  ) : (
-                    <div className="flex items-center gap-2">
+                {/* Edit toggle + Regenerate */}
+                <div className="flex items-center justify-between">
+                  {/* Regenerate button */}
+                  <button
+                    onClick={handleRegenerate}
+                    disabled={regenerating || !onRegenerate}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Regenerar el borrador personalizado a este lead usando IA"
+                  >
+                    {regenerating ? (
+                      <RefreshCw size={13} className="animate-spin" />
+                    ) : (
+                      <Sparkles size={13} />
+                    )}
+                    {regenerating ? 'Regenerando...' : 'Regenerar con IA'}
+                  </button>
+
+                  {/* Edit controls */}
+                  <div>
+                    {!isEditing ? (
                       <button
-                        onClick={handleCancelEdit}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
+                        onClick={() => setIsEditing(true)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-violet-600 bg-violet-50 hover:bg-violet-100 rounded-lg transition-colors"
                       >
-                        <X size={13} />
-                        Cancelar
+                        <Pencil size={13} />
+                        Editar borrador
                       </button>
-                      <button
-                        onClick={handleSaveDraft}
-                        disabled={saving}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-violet-600 hover:bg-violet-700 rounded-lg transition-colors disabled:opacity-50"
-                      >
-                        {saving ? <RefreshCw size={13} className="animate-spin" /> : <Save size={13} />}
-                        Guardar cambios
-                      </button>
-                    </div>
-                  )}
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={handleCancelEdit}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
+                        >
+                          <X size={13} />
+                          Cancelar
+                        </button>
+                        <button
+                          onClick={handleSaveDraft}
+                          disabled={saving}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-violet-600 hover:bg-violet-700 rounded-lg transition-colors disabled:opacity-50"
+                        >
+                          {saving ? <RefreshCw size={13} className="animate-spin" /> : <Save size={13} />}
+                          Guardar cambios
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
+
+                {/* Regeneration error */}
+                {regenerateError && (
+                  <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
+                    <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                    {regenerateError}
+                  </div>
+                )}
 
                 {/* Subject */}
                 <div>
