@@ -176,9 +176,14 @@ export const useGrowthSystem = () => {
 
       if (updateErr) throw updateErr;
 
-      setLeads(prev => prev.map(l =>
-        l.id === leadId ? { ...l, status } : l
-      ));
+      // Remove from list if ignored or promoted, otherwise update status
+      if (status === 'ignored' || status === 'promoted') {
+        setLeads(prev => prev.filter(l => l.id !== leadId));
+      } else {
+        setLeads(prev => prev.map(l =>
+          l.id === leadId ? { ...l, status } : l
+        ));
+      }
       return true;
     } catch (err) {
       console.error('Error updating lead:', err);
