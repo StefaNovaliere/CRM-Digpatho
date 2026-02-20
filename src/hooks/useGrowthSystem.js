@@ -363,38 +363,81 @@ export const useGrowthSystem = () => {
     setEnrichmentRunning(true);
     setEnrichmentResult(null);
     setError(null);
+
+    const BATCH_SIZE = 25;
+    const aggregated = {
+      total: leadIds.length,
+      found: 0,
+      not_found: 0,
+      errors: 0,
+      already_had_email: 0,
+      details: [],
+      totalSubmitted: leadIds.length,
+    };
+
     try {
-      const response = await fetch('/api/email-enrichment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lead_ids: leadIds }),
-      });
+      // Process in batches of 25 (API limit)
+      for (let i = 0; i < leadIds.length; i += BATCH_SIZE) {
+        const batch = leadIds.slice(i, i + BATCH_SIZE);
 
-      const data = await response.json();
+        // Show progress during multi-batch processing
+        if (leadIds.length > BATCH_SIZE) {
+          const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+          const totalBatches = Math.ceil(leadIds.length / BATCH_SIZE);
+          setEnrichmentResult({
+            ...aggregated,
+            processing: true,
+            batchProgress: `Procesando lote ${batchNum} de ${totalBatches}...`,
+          });
+        }
 
-      if (!response.ok) {
-        throw new Error(data.error || 'Error en la búsqueda de emails');
-      }
+        const response = await fetch('/api/email-enrichment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lead_ids: batch }),
+        });
 
-      const results = data.results;
-      setEnrichmentResult(results);
+        const data = await response.json();
 
-      // Update local leads with found emails
-      if (results.details) {
-        const foundEmails = {};
-        for (const detail of results.details) {
-          if (detail.status === 'found' && detail.email) {
-            foundEmails[detail.lead_id] = detail.email;
+        if (!response.ok) {
+          throw new Error(data.error || 'Error en la búsqueda de emails');
+        }
+
+        const results = data.results;
+        aggregated.found += results.found || 0;
+        aggregated.not_found += results.not_found || 0;
+        aggregated.errors += results.errors || 0;
+        aggregated.already_had_email += results.already_had_email || 0;
+        if (results.details) {
+          aggregated.details.push(...results.details);
+        }
+
+        // Update local leads progressively with found emails from this batch
+        if (results.details) {
+          const foundEmails = {};
+          for (const detail of results.details) {
+            if (detail.status === 'found' && detail.email) {
+              foundEmails[detail.lead_id] = detail.email;
+            }
+          }
+          if (Object.keys(foundEmails).length > 0) {
+            setLeads(prev => prev.map(l =>
+              foundEmails[l.id] ? { ...l, email: foundEmails[l.id] } : l
+            ));
           }
         }
-        if (Object.keys(foundEmails).length > 0) {
-          setLeads(prev => prev.map(l =>
-            foundEmails[l.id] ? { ...l, email: foundEmails[l.id] } : l
-          ));
+
+        // Check if rate limited — stop processing further batches
+        const rateLimited = results.details?.some(d => d.status === 'rate_limited');
+        if (rateLimited) {
+          aggregated.rateLimitedRemaining = leadIds.length - (i + batch.length);
+          break;
         }
       }
 
-      return results;
+      aggregated.processing = false;
+      setEnrichmentResult(aggregated);
+      return aggregated;
     } catch (err) {
       console.error('Error enriching emails:', err);
       setError(err.message);
