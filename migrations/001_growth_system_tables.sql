@@ -113,6 +113,9 @@ CREATE POLICY "Authenticated users can insert growth_leads"
 CREATE POLICY "Authenticated users can update growth_leads"
     ON growth_leads FOR UPDATE TO authenticated USING (true);
 
+CREATE POLICY "Authenticated users can delete growth_leads"
+    ON growth_leads FOR DELETE TO authenticated USING (true);
+
 CREATE POLICY "Authenticated users can read growth_email_drafts"
     ON growth_email_drafts FOR SELECT TO authenticated USING (true);
 
@@ -121,3 +124,6 @@ CREATE POLICY "Authenticated users can insert growth_email_drafts"
 
 CREATE POLICY "Authenticated users can update growth_email_drafts"
     ON growth_email_drafts FOR UPDATE TO authenticated USING (true);
+
+CREATE POLICY "Authenticated users can delete growth_email_drafts"
+    ON growth_email_drafts FOR DELETE TO authenticated USING (true);

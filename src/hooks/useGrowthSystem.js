@@ -267,12 +267,17 @@ export const useGrowthSystem = () => {
   // Delete lead permanently from the database
   const ignoreLead = useCallback(async (leadId) => {
     try {
-      const { error: deleteErr } = await supabase
+      const { data, error: deleteErr } = await supabase
         .from('growth_leads')
         .delete()
-        .eq('id', leadId);
+        .eq('id', leadId)
+        .select();
 
       if (deleteErr) throw deleteErr;
+
+      if (!data || data.length === 0) {
+        throw new Error('No se pudo eliminar el lead. Verifique permisos de base de datos.');
+      }
 
       setLeads(prev => prev.filter(l => l.id !== leadId));
       return true;
