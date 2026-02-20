@@ -135,7 +135,7 @@ async function regenerateViaAI(apiKey, lead, draft, vertical) {
   const prompt = buildRegenerationPrompt(lead, draft, vertical);
 
   const requestBody = JSON.stringify({
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-4-5-20250929',
     max_tokens: 2000,
     messages: [
       { role: 'user', content: prompt },
@@ -208,10 +208,10 @@ function parseRegenerationResponse(apiResponse) {
 
   const text = textBlocks.map(b => b.text).join('\n');
 
-  const subjectMatch = text.match(/\*\*Asunto:\*\*\s*(.+?)(?=\n|$)/i);
+  const subjectMatch = text.match(/\*{0,2}\s*Asunto\s*:?\s*\*{0,2}\s*:?\s*(.+?)(?=\n|$)/i);
   const subject = subjectMatch ? subjectMatch[1].trim() : null;
 
-  const bodyMatch = text.match(/\*\*Cuerpo:\*\*\s*([\s\S]*?)$/i);
+  const bodyMatch = text.match(/\*{0,2}\s*Cuerpo\s*:?\s*\*{0,2}\s*:?\s*([\s\S]*?)$/i);
   const body = bodyMatch ? bodyMatch[1].trim() : null;
 
   if (!subject && !body) {

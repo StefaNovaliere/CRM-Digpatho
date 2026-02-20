@@ -1600,7 +1600,7 @@ class ContextualCopywriter:
     """
 
     ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
-    ANTHROPIC_MODEL = "claude-sonnet-4-20250514"
+    ANTHROPIC_MODEL = "claude-sonnet-4-5-20250929"
 
     def __init__(self, supabase_client: Any, dry_run: bool = False):
         self.db = supabase_client
@@ -1920,10 +1920,10 @@ Recuerda:
     def _parse_ai_response(text: str) -> Optional[Tuple[str, str]]:
         """Parse Claude's response into (subject, body)."""
         subject_match = re.search(
-            r"\*\*Asunto:\*\*\s*(.+?)(?=\n|$)", text, re.IGNORECASE
+            r"\*{0,2}\s*Asunto\s*:?\s*\*{0,2}\s*:?\s*(.+?)(?=\n|$)", text, re.IGNORECASE
         )
         body_match = re.search(
-            r"\*\*Cuerpo:\*\*\s*([\s\S]*?)(?=\*\*Notas internas:\*\*|$)",
+            r"\*{0,2}\s*Cuerpo\s*:?\s*\*{0,2}\s*:?\s*([\s\S]*?)(?=\*{0,2}\s*Notas internas|$)",
             text, re.IGNORECASE,
         )
 
@@ -1933,7 +1933,7 @@ Recuerda:
         else:
             # Fallback: everything after subject
             body = re.sub(
-                r"\*\*Asunto:\*\*.*\n?", "", text, flags=re.IGNORECASE
+                r"\*{0,2}\s*Asunto\s*:?\s*\*{0,2}\s*:?.*\n?", "", text, flags=re.IGNORECASE
             ).strip()
 
         if not subject or not body:

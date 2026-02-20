@@ -673,7 +673,7 @@ Responde EXACTAMENTE en este formato:
           'anthropic-dangerous-direct-browser-access': 'true',
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
+          model: 'claude-sonnet-4-5-20250929',
           max_tokens: 2000,
           messages: [{ role: 'user', content: prompt }],
         }),
@@ -694,8 +694,8 @@ Responde EXACTAMENTE en este formato:
       if (textBlocks.length === 0) throw new Error('No se recibió respuesta del modelo.');
 
       const text = textBlocks.map(b => b.text).join('\n');
-      const subjectMatch = text.match(/\*\*Asunto:\*\*\s*(.+?)(?=\n|$)/i);
-      const bodyMatch = text.match(/\*\*Cuerpo:\*\*\s*([\s\S]*?)$/i);
+      const subjectMatch = text.match(/\*{0,2}\s*Asunto\s*:?\s*\*{0,2}\s*:?\s*(.+?)(?=\n|$)/i);
+      const bodyMatch = text.match(/\*{0,2}\s*Cuerpo\s*:?\s*\*{0,2}\s*:?\s*([\s\S]*?)$/i);
 
       return {
         success: true,

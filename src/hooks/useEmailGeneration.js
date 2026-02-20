@@ -96,7 +96,7 @@ export const useEmailGeneration = () => {
           'anthropic-dangerous-direct-browser-access': 'true'
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
+          model: 'claude-sonnet-4-5-20250929',
           max_tokens: 1500,
           system: systemPrompt,
           messages: [
@@ -107,14 +107,17 @@ export const useEmailGeneration = () => {
 
       if (!response.ok) {
         const errorData = await response.json();
+        console.error('[Email Gen] API error:', response.status, errorData);
         throw new Error(errorData.error?.message || 'Error al generar email');
       }
 
       const data = await response.json();
       const generatedText = data.content[0].text;
+      console.log('[Email Gen] Raw AI response:', generatedText.substring(0, 200));
 
       // 6. Parsear el resultado
       const parsed = parseEmailResponse(generatedText);
+      console.log('[Email Gen] Parsed result:', { subject: parsed.subject?.substring(0, 50), bodyLen: parsed.body?.length });
 
       // 7. Guardar borrador
       const { data: draft, error: draftError } = await supabase
@@ -135,7 +138,7 @@ export const useEmailGeneration = () => {
               institution: contact.institution?.name
             }
           },
-          ai_model: 'claude-sonnet-4-20250514'
+          ai_model: 'claude-sonnet-4-5-20250929'
         })
         .select()
         .single();
@@ -205,17 +208,20 @@ IMPORTANTE: Recuerda seguir estrictamente el formato de respuesta con **Asunto**
 function parseEmailResponse(text) {
   const result = { subject: '', body: '', notes: '' };
 
-  const subjectMatch = text.match(/\*\*Asunto:\*\*\s*(.+?)(?=\n|$)/i);
+  // Handle both **Asunto:** and **Asunto**: formats (colon inside or outside bold)
+  const subjectMatch = text.match(/\*{0,2}\s*Asunto\s*:?\s*\*{0,2}\s*:?\s*(.+?)(?=\n|$)/i);
   if (subjectMatch) result.subject = subjectMatch[1].trim();
 
-  const bodyMatch = text.match(/\*\*Cuerpo:\*\*\s*([\s\S]*?)(?=\*\*Notas internas:\*\*|$)/i);
+  // Handle both **Cuerpo:** and **Cuerpo**: formats
+  const bodyMatch = text.match(/\*{0,2}\s*Cuerpo\s*:?\s*\*{0,2}\s*:?\s*([\s\S]*?)(?=\*{0,2}\s*Notas internas|$)/i);
   if (bodyMatch) {
     result.body = bodyMatch[1].trim();
   } else {
-    result.body = text.replace(/\*\*Asunto:\*\*.*\n?/i, '').trim();
+    result.body = text.replace(/\*{0,2}\s*Asunto\s*:?\s*\*{0,2}\s*:?.*\n?/i, '').trim();
   }
 
-  const notesMatch = text.match(/\*\*Notas internas:\*\*\s*([\s\S]*?)$/i);
+  // Handle both **Notas internas:** and **Notas internas**: formats
+  const notesMatch = text.match(/\*{0,2}\s*Notas internas\s*:?\s*\*{0,2}\s*:?\s*([\s\S]*?)$/i);
   if (notesMatch) result.notes = notesMatch[1].trim();
 
   return result;
