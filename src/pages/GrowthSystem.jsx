@@ -32,7 +32,10 @@ import {
   Briefcase,
   Globe,
   AtSign,
-  Settings
+  Settings,
+  CheckSquare,
+  Square,
+  MinusSquare
 } from 'lucide-react';
 import { useGrowthSystem } from '../hooks/useGrowthSystem';
 import { DraftReviewModal } from '../components/growth/DraftReviewModal';
@@ -139,6 +142,54 @@ export const GrowthSystem = () => {
   const [showModeMenu, setShowModeMenu] = useState(null); // vertical key or null
   const [queryManagerVertical, setQueryManagerVertical] = useState(null); // vertical key or null
   const [draftSearchQuery, setDraftSearchQuery] = useState('');
+  const [selectedLeadIds, setSelectedLeadIds] = useState(new Set());
+  const [bulkProcessing, setBulkProcessing] = useState(false);
+
+  // Multi-select helpers
+  const toggleLeadSelection = (leadId, e) => {
+    e.stopPropagation();
+    setSelectedLeadIds(prev => {
+      const next = new Set(prev);
+      if (next.has(leadId)) next.delete(leadId);
+      else next.add(leadId);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedLeadIds.size === leads.length) {
+      setSelectedLeadIds(new Set());
+    } else {
+      setSelectedLeadIds(new Set(leads.map(l => l.id)));
+    }
+  };
+
+  const clearSelection = () => setSelectedLeadIds(new Set());
+
+  // Bulk actions
+  const handleBulkDelete = async () => {
+    if (selectedLeadIds.size === 0) return;
+    setBulkProcessing(true);
+    for (const id of selectedLeadIds) {
+      await ignoreLead(id);
+    }
+    setSelectedLeadIds(new Set());
+    loadStats();
+    setBulkProcessing(false);
+  };
+
+  const handleBulkPromote = async () => {
+    if (selectedLeadIds.size === 0) return;
+    setBulkProcessing(true);
+    for (const lead of leads.filter(l => selectedLeadIds.has(l.id) && l.status !== 'promoted')) {
+      await promoteLeadToContact(lead);
+    }
+    setSelectedLeadIds(new Set());
+    loadStats();
+    const v = selectedVertical === 'all' ? null : selectedVertical;
+    loadLeads({ vertical: v, search: searchQuery || null });
+    setBulkProcessing(false);
+  };
 
   // Pipeline execution
   const handleRunPipeline = async (vertical, mode) => {
@@ -165,6 +216,7 @@ export const GrowthSystem = () => {
     const v = selectedVertical === 'all' ? null : selectedVertical;
     loadLeads({ vertical: v, search: searchQuery || null });
     loadDrafts({ vertical: v });
+    setSelectedLeadIds(new Set());
   }, [selectedVertical]);
 
   const handleSearch = () => {
@@ -495,15 +547,64 @@ export const GrowthSystem = () => {
         {activeTab === 'leads' && (
           <>
             <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-              <h2 className="font-semibold text-gray-900">
-                Leads Descubiertos
-                <span className="ml-2 text-sm font-normal text-gray-500">
-                  ({leads.length} {selectedVertical !== 'all' ? `en ${GROWTH_VERTICALS[selectedVertical]?.label}` : 'total'})
-                </span>
-              </h2>
-
+              <div className="flex items-center gap-3">
+                {leads.length > 0 && (
+                  <button
+                    onClick={toggleSelectAll}
+                    className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
+                    title={selectedLeadIds.size === leads.length ? 'Deseleccionar todos' : 'Seleccionar todos'}
+                  >
+                    {selectedLeadIds.size === leads.length && leads.length > 0 ? (
+                      <CheckSquare size={18} className="text-blue-600" />
+                    ) : selectedLeadIds.size > 0 ? (
+                      <MinusSquare size={18} className="text-blue-600" />
+                    ) : (
+                      <Square size={18} />
+                    )}
+                  </button>
+                )}
+                <h2 className="font-semibold text-gray-900">
+                  Leads Descubiertos
+                  <span className="ml-2 text-sm font-normal text-gray-500">
+                    ({leads.length} {selectedVertical !== 'all' ? `en ${GROWTH_VERTICALS[selectedVertical]?.label}` : 'total'})
+                  </span>
+                </h2>
+              </div>
             </div>
 
+            {/* Bulk action bar */}
+            {selectedLeadIds.size > 0 && (
+              <div className="px-6 py-3 bg-blue-50 border-b border-blue-200 flex items-center justify-between">
+                <span className="text-sm font-medium text-blue-800">
+                  {selectedLeadIds.size} lead{selectedLeadIds.size > 1 ? 's' : ''} seleccionado{selectedLeadIds.size > 1 ? 's' : ''}
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleBulkPromote}
+                    disabled={bulkProcessing}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    {bulkProcessing ? <RefreshCw size={13} className="animate-spin" /> : <UserPlus size={13} />}
+                    Agregar al CRM
+                  </button>
+                  <button
+                    onClick={handleBulkDelete}
+                    disabled={bulkProcessing}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    {bulkProcessing ? <RefreshCw size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                    Eliminar seleccionados
+                  </button>
+                  <button
+                    onClick={clearSelection}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-blue-100 rounded-lg transition-colors"
+                  >
+                    <X size={13} />
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            )}
 
             {loading ? (
               <div className="p-12 text-center">
@@ -525,12 +626,26 @@ export const GrowthSystem = () => {
                 {leads.map((lead) => (
                   <div
                     key={lead.id}
-                    className="px-6 py-4 hover:bg-gray-50 transition-colors cursor-pointer"
+                    className={`px-6 py-4 hover:bg-gray-50 transition-colors cursor-pointer ${
+                      selectedLeadIds.has(lead.id) ? 'bg-blue-50/50' : ''
+                    }`}
                     onClick={() => setSelectedLead(lead)}
                   >
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-start justify-between gap-3">
+                      {/* Checkbox */}
+                      <button
+                        onClick={(e) => toggleLeadSelection(lead.id, e)}
+                        className="mt-0.5 p-0.5 flex-shrink-0 text-gray-400 hover:text-blue-600 transition-colors"
+                      >
+                        {selectedLeadIds.has(lead.id) ? (
+                          <CheckSquare size={18} className="text-blue-600" />
+                        ) : (
+                          <Square size={18} />
+                        )}
+                      </button>
+
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2.5 mb-1">
+                        <div className="flex items-center gap-2.5 mb-1 flex-wrap">
                           <h3 className="font-medium text-gray-900">
                             {lead.full_name || '[Sin nombre]'}
                           </h3>
@@ -567,15 +682,15 @@ export const GrowthSystem = () => {
                             </a>
                           )}
                         </div>
-                        {/* Description from Google snippet */}
+                        {/* Description — full text, no truncation */}
                         {lead.extra_data?.description && (
-                          <p className="mt-1.5 text-sm text-gray-500 leading-relaxed">
+                          <p className="mt-1.5 text-sm text-gray-600 leading-relaxed whitespace-pre-wrap break-words">
                             {lead.extra_data.description}
                           </p>
                         )}
                       </div>
 
-                      <div className="flex items-center gap-2 ml-4">
+                      <div className="flex items-center gap-2 flex-shrink-0">
                         {/* LinkedIn */}
                         {lead.linkedin_url && (
                           <a
