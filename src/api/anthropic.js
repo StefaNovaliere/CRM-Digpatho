@@ -1,9 +1,13 @@
 // src/api/anthropic.js
-const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
+// Frontend client that calls the server-side proxy (/api/anthropic-proxy)
+// instead of calling the Anthropic API directly from the browser.
+// This keeps the API key server-side and never exposes it to the client.
+
+const PROXY_URL = '/api/anthropic-proxy';
 
 export const anthropicClient = {
   /**
-   * Genera un mensaje usando la API de Claude
+   * Genera un mensaje usando Claude a través del proxy server-side
    * @param {string} systemPrompt - Instrucciones del sistema
    * @param {string} userMessage - Mensaje del usuario
    * @param {object} options - Opciones adicionales
@@ -15,41 +19,24 @@ export const anthropicClient = {
       temperature = 0.7
     } = options;
 
-    const response = await fetch(ANTHROPIC_API_URL, {
+    const response = await fetch(PROXY_URL, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': import.meta.env.VITE_ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true'
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        systemPrompt,
+        userMessage,
         model,
-        max_tokens: maxTokens,
+        maxTokens,
         temperature,
-        system: systemPrompt,
-        messages: [
-          { role: 'user', content: userMessage }
-        ]
       })
     });
 
     if (!response.ok) {
       const error = await response.json();
-      throw new Error(error.error?.message || 'Error en la API de Anthropic');
+      throw new Error(error.error || 'Error en la API de Anthropic');
     }
 
-    const data = await response.json();
-
-    return {
-      content: data.content[0].text,
-      usage: {
-        inputTokens: data.usage?.input_tokens,
-        outputTokens: data.usage?.output_tokens
-      },
-      model: data.model,
-      stopReason: data.stop_reason
-    };
+    return response.json();
   },
 
   /**
