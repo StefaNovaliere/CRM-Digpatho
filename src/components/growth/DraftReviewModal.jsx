@@ -60,7 +60,7 @@ export const DraftReviewModal = ({ draft, onClose, onApprove, onReject, onViewLe
   const lead = draft.lead || {};
   const verticalConfig = GROWTH_VERTICALS[draft.vertical] || {};
   const gradientClass = verticalColors[draft.vertical] || 'from-gray-500 to-gray-600';
-  const description = lead.extra_data?.description || '';
+  const description = (lead.extra_data?.description || '').replace(/<\/?cite[^>]*>/gi, '');
 
   // Load available campaigns when campaign step is shown
   useEffect(() => {
