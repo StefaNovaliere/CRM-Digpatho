@@ -183,15 +183,27 @@ function parseLinkedInUrl(url) {
   return match ? match[1].replace(/\/$/, '') : null;
 }
 
+function cleanTruncated(text) {
+  if (!text) return null;
+  return text.replace(/\s*\.{2,}\s*$/, '').replace(/…$/, '').trim() || null;
+}
+
 function parseLinkedInTitle(title) {
   if (!title) return { name: null, jobTitle: null, company: null };
   title = title.replace(/\s*[|–—]\s*LinkedIn\s*$/i, '');
   const parts = title.split(/\s*[-–—]\s*/).map(p => p.trim()).filter(Boolean);
-  return {
-    name: parts[0] || null,
-    jobTitle: parts[1] || null,
-    company: parts[2] || null,
-  };
+
+  let name = cleanTruncated(parts[0]) || null;
+  let jobTitle = cleanTruncated(parts[1]) || null;
+  let company = cleanTruncated(parts[2]) || null;
+
+  // If there are >3 parts, the middle ones are likely all part of the job title
+  if (parts.length > 3) {
+    jobTitle = cleanTruncated(parts.slice(1, -1).join(' - '));
+    company = cleanTruncated(parts[parts.length - 1]);
+  }
+
+  return { name, jobTitle, company };
 }
 
 function inferNameFromSlug(slug) {
@@ -262,7 +274,7 @@ function fillTemplate(template, lead) {
 // ---------------------------------------------------------------------------
 // Agent 1: Search via SerpAPI
 // ---------------------------------------------------------------------------
-async function searchVertical(vertical) {
+async function searchVertical(vertical, supabase) {
   const serpApiKey = process.env.SERPAPI_KEY;
   if (!serpApiKey) {
     throw new Error('SERPAPI_KEY not configured. Set it in Vercel Environment Variables to enable Google search.');
@@ -271,9 +283,26 @@ async function searchVertical(vertical) {
   const config = VERTICAL_CONFIGS[vertical];
   if (!config) throw new Error(`Unknown vertical: ${vertical}`);
 
+  // Load custom queries from DB and merge with hardcoded ones
+  let queries = [...config.search_queries];
+  try {
+    const { data: customQueries } = await supabase
+      .from('growth_search_queries')
+      .select('query')
+      .eq('vertical', vertical)
+      .eq('enabled', true);
+
+    if (customQueries && customQueries.length > 0) {
+      queries = queries.concat(customQueries.map(q => q.query));
+      console.log(`Loaded ${customQueries.length} custom queries for ${vertical}`);
+    }
+  } catch (err) {
+    console.error('Error loading custom queries (table may not exist yet):', err.message);
+  }
+
   const allLeads = [];
 
-  for (const query of config.search_queries) {
+  for (const query of queries) {
     try {
       const params = new URLSearchParams({
         q: query,
@@ -299,10 +328,27 @@ async function searchVertical(vertical) {
         const slug = parseLinkedInUrl(url);
         if (!slug) continue;
 
-        const { name, jobTitle, company } = parseLinkedInTitle(result.title || '');
+        let { name, jobTitle, company } = parseLinkedInTitle(result.title || '');
         const geo = inferGeoFromQuery(query);
         const snippet = result.snippet || result.description || '';
         const foundEmails = extractEmailsFromText(`${result.title || ''} ${snippet}`);
+
+        // Try to get fuller job title from snippet
+        if (snippet && jobTitle) {
+          const snippetLower = snippet.toLowerCase();
+          const jtLower = jobTitle.toLowerCase();
+          if (snippetLower.includes(jtLower)) {
+            const idx = snippetLower.indexOf(jtLower);
+            const rest = snippet.substring(idx);
+            const match = rest.match(/^([^.·|]+)/);
+            if (match) {
+              const fuller = cleanTruncated(match[1].trim());
+              if (fuller && fuller.length > jobTitle.length) {
+                jobTitle = fuller;
+              }
+            }
+          }
+        }
 
         allLeads.push({
           full_name: name || inferNameFromSlug(slug),
@@ -313,6 +359,7 @@ async function searchVertical(vertical) {
           vertical,
           source_query: query,
           geo,
+          description: snippet,
         });
       }
     } catch (err) {
@@ -338,19 +385,47 @@ async function processLeads(supabase, rawLeads) {
       continue;
     }
 
-    // Dedup check
-    const { data: existing } = await supabase
+    // Dedup check against growth_leads
+    const { data: existingLead } = await supabase
       .from('growth_leads')
       .select('id')
       .eq('linkedin_url', linkedinUrl)
       .limit(1);
 
-    if (existing && existing.length > 0) {
+    if (existingLead && existingLead.length > 0) {
       duplicates++;
       continue;
     }
 
+    // Dedup check against CRM contacts (by email or name)
     const { firstName, lastName } = splitName(lead.full_name);
+    let alreadyInCRM = false;
+
+    if (lead.email) {
+      const { data: byEmail } = await supabase
+        .from('contacts')
+        .select('id')
+        .eq('email', lead.email)
+        .limit(1);
+      if (byEmail && byEmail.length > 0) alreadyInCRM = true;
+    }
+
+    if (!alreadyInCRM && firstName && lastName) {
+      const { data: byName } = await supabase
+        .from('contacts')
+        .select('id')
+        .ilike('first_name', firstName)
+        .ilike('last_name', lastName)
+        .limit(1);
+      if (byName && byName.length > 0) alreadyInCRM = true;
+    }
+
+    if (alreadyInCRM) {
+      console.log(`Already in CRM contacts, skipping: ${lead.full_name}`);
+      duplicates++;
+      continue;
+    }
+
     const record = {
       full_name: lead.full_name,
       first_name: firstName,
@@ -363,7 +438,7 @@ async function processLeads(supabase, rawLeads) {
       source_query: lead.source_query,
       geo: lead.geo,
       status: 'new',
-      extra_data: {},
+      extra_data: { description: lead.description || '' },
     };
 
     const { data, error } = await supabase
@@ -489,7 +564,7 @@ export default async function handler(req, res) {
 
     // --- SEARCH PHASE ---
     if (mode === 'search' || mode === 'full') {
-      const rawLeads = await searchVertical(vertical);
+      const rawLeads = await searchVertical(vertical, supabase);
       results.leads_found = rawLeads.length;
 
       const { inserted, duplicates, errors } = await processLeads(supabase, rawLeads);

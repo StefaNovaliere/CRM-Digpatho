@@ -876,6 +876,13 @@ def parse_linkedin_url(url: str) -> Optional[str]:
     return match.group(1).rstrip("/") if match else None
 
 
+def _clean_truncated(text: Optional[str]) -> Optional[str]:
+    """Remove trailing ellipsis left by Google's title truncation."""
+    if not text:
+        return text
+    return re.sub(r"\s*\.{2,}\s*$", "", text).rstrip("…").strip() or None
+
+
 def parse_linkedin_title(title: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """
     Parse a LinkedIn search result title into (name, job_title, company).
@@ -890,9 +897,15 @@ def parse_linkedin_title(title: str) -> Tuple[Optional[str], Optional[str], Opti
     # Split by common separators
     parts = [p.strip() for p in re.split(r"\s*[-–—]\s*", title) if p.strip()]
 
-    name = parts[0] if len(parts) > 0 else None
-    job_title = parts[1] if len(parts) > 1 else None
-    company = parts[2] if len(parts) > 2 else None
+    name = _clean_truncated(parts[0]) if len(parts) > 0 else None
+    job_title = _clean_truncated(parts[1]) if len(parts) > 1 else None
+    company = _clean_truncated(parts[2]) if len(parts) > 2 else None
+
+    # If there are >3 parts, the middle ones are likely all part of the job title
+    # e.g. "Name - Senior Director - Digital Pathology - Company | LinkedIn"
+    if len(parts) > 3:
+        job_title = _clean_truncated(" - ".join(parts[1:-1]))
+        company = _clean_truncated(parts[-1])
 
     return name, job_title, company
 
@@ -1108,6 +1121,22 @@ class SafeSearcher:
                     f"{title} {snippet}"
                 )
 
+                # Try to get fuller job title / company from snippet
+                # when the Google title was truncated
+                if snippet and job_title:
+                    # Snippets often start with the full title text
+                    snippet_lower = snippet.lower()
+                    jt_lower = job_title.lower()
+                    if jt_lower in snippet_lower:
+                        idx = snippet_lower.index(jt_lower)
+                        # Extract longer version up to next sentence boundary
+                        rest = snippet[idx:]
+                        match = re.match(r"^([^.·|]+)", rest)
+                        if match:
+                            fuller = _clean_truncated(match.group(1).strip())
+                            if fuller and len(fuller) > len(job_title):
+                                job_title = fuller
+
                 lead = {
                     "full_name": name,
                     "job_title": job_title,
@@ -1293,10 +1322,21 @@ class LeadManager:
                 self.stats["errors"] += 1
                 continue
 
-            # Check for existing lead (dedup)
+            # Check for existing lead in growth_leads (dedup by LinkedIn URL)
             if self._lead_exists(linkedin_url):
                 logger.debug(
-                    "[LeadManager] Duplicate skipped: %s", linkedin_url
+                    "[LeadManager] Duplicate skipped (growth_leads): %s", linkedin_url
+                )
+                self.stats["duplicates"] += 1
+                continue
+
+            # Check if this person already exists in the CRM contacts table
+            full_name = lead.get("full_name", "")
+            email = lead.get("email")
+            if self._contact_exists(full_name, email):
+                logger.info(
+                    "[LeadManager] Already in CRM contacts, skipping: %s (%s)",
+                    full_name, email or "no email",
                 )
                 self.stats["duplicates"] += 1
                 continue
@@ -1461,6 +1501,43 @@ class LeadManager:
             return bool(result.data)
         except Exception as exc:
             logger.error("[LeadManager] Dedup check error: %s", exc)
+            return False
+
+    def _contact_exists(self, full_name: str, email: Optional[str]) -> bool:
+        """Check if a contact with this name or email already exists in the CRM."""
+        if self.dry_run:
+            return False
+        try:
+            # Check by email first (most reliable)
+            if email:
+                result = (
+                    self.db.table("contacts")
+                    .select("id")
+                    .eq("email", email)
+                    .limit(1)
+                    .execute()
+                )
+                if result.data:
+                    return True
+
+            # Check by full name (first_name + last_name)
+            if full_name:
+                first_name, last_name = self._split_name(full_name)
+                if first_name and last_name:
+                    result = (
+                        self.db.table("contacts")
+                        .select("id")
+                        .ilike("first_name", first_name)
+                        .ilike("last_name", last_name)
+                        .limit(1)
+                        .execute()
+                    )
+                    if result.data:
+                        return True
+
+            return False
+        except Exception as exc:
+            logger.error("[LeadManager] CRM contacts dedup check error: %s", exc)
             return False
 
     @staticmethod
