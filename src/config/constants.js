@@ -154,8 +154,8 @@ export const APP_CONFIG = {
 
 // Modelos de IA disponibles
 export const AI_MODELS = {
-  default: 'claude-sonnet-4-20250514',
-  fast: 'claude-3-haiku-20240307'
+  default: 'claude-sonnet-4-6',
+  fast: 'claude-haiku-4-5-20251001'
 };
 
 // Tipos de email que se pueden generar

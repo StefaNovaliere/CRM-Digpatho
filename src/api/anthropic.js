@@ -10,7 +10,7 @@ export const anthropicClient = {
    */
   async generateMessage(systemPrompt, userMessage, options = {}) {
     const {
-      model = 'claude-sonnet-4-20250514',
+      model = 'claude-sonnet-4-6',
       maxTokens = 1024,
       temperature = 0.7
     } = options;
