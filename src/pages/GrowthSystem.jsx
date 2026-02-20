@@ -539,7 +539,7 @@ export const GrowthSystem = () => {
             <p className="text-sm text-red-600 mt-1">{error}</p>
             <p className="text-xs text-red-500 mt-2">
               Verificá que las tablas growth_leads y growth_email_drafts existan.
-              Ejecutá el SQL de migrations/001_growth_system_tables.sql en Supabase.
+              Ejecutá el SQL de migrations/000_safe_full_setup.sql en Supabase SQL Editor.
             </p>
           </div>
         </div>

@@ -1,24 +1,17 @@
 -- ============================================================
--- Digpatho AI Growth System — Database Migration
+-- Digpatho AI Growth System — SAFE Full Setup (Idempotent)
 -- ============================================================
--- Run this in Supabase SQL Editor before using ai_growth_system.py
+-- This script is SAFE to run multiple times. It will:
+--   1. Create tables if they don't exist
+--   2. Drop and re-create all RLS policies (no duplicates)
+--   3. Add columns from migrations 002-005 if missing
 --
--- Creates two new tables:
---   growth_leads        — Raw prospects from Google Dorking
---   growth_email_drafts — Email drafts for human review
---
--- These tables are SEPARATE from the existing contacts/email_drafts
--- tables to avoid polluting the qualified CRM pipeline with
--- unvalidated prospect data.
+-- Run this ONCE in Supabase SQL Editor to set up everything.
 -- ============================================================
 
 -- =========================
 -- Table: growth_leads
 -- =========================
--- Stores raw LinkedIn prospects discovered via Google Dorking.
--- Each lead is tagged with a GTM vertical (DIRECT_B2B, PHARMA,
--- INFLUENCER, EVENTS) from the Bull's-eye framework.
-
 CREATE TABLE IF NOT EXISTS growth_leads (
     id              UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     full_name       TEXT,
@@ -39,30 +32,19 @@ CREATE TABLE IF NOT EXISTS growth_leads (
     updated_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Dedup index on LinkedIn URL
+-- Indexes
 CREATE UNIQUE INDEX IF NOT EXISTS idx_growth_leads_linkedin_url
     ON growth_leads(linkedin_url);
-
--- Filter by vertical
 CREATE INDEX IF NOT EXISTS idx_growth_leads_vertical
     ON growth_leads(vertical);
-
--- Filter by status (for finding new leads without drafts)
 CREATE INDEX IF NOT EXISTS idx_growth_leads_status
     ON growth_leads(status);
-
--- Index on email (for lookups)
 CREATE INDEX IF NOT EXISTS idx_growth_leads_email
     ON growth_leads(email) WHERE email IS NOT NULL;
-
 
 -- =========================
 -- Table: growth_email_drafts
 -- =========================
--- Stores email drafts generated for growth leads.
--- Status starts as 'draft_pending_review' — NEVER sent automatically.
--- Human reviewer must approve before any email is sent.
-
 CREATE TABLE IF NOT EXISTS growth_email_drafts (
     id                  UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     lead_id             UUID NOT NULL REFERENCES growth_leads(id) ON DELETE CASCADE,
@@ -80,60 +62,93 @@ CREATE TABLE IF NOT EXISTS growth_email_drafts (
     reviewed_at         TIMESTAMPTZ
 );
 
--- Find unreviewed drafts
 CREATE INDEX IF NOT EXISTS idx_growth_drafts_status
     ON growth_email_drafts(status);
-
--- Find drafts by lead
 CREATE INDEX IF NOT EXISTS idx_growth_drafts_lead_id
     ON growth_email_drafts(lead_id);
-
--- Find drafts by vertical
 CREATE INDEX IF NOT EXISTS idx_growth_drafts_vertical
     ON growth_email_drafts(vertical);
 
+-- =========================
+-- Table: growth_search_queries
+-- =========================
+CREATE TABLE IF NOT EXISTS growth_search_queries (
+    id          UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    vertical    TEXT NOT NULL
+                    CHECK (vertical IN ('DIRECT_B2B', 'PHARMA', 'INFLUENCER', 'EVENTS')),
+    query       TEXT NOT NULL,
+    enabled     BOOLEAN DEFAULT true,
+    created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_growth_search_queries_vertical
+    ON growth_search_queries(vertical);
+
+-- =========================
+-- Columns from migration 005
+-- =========================
+ALTER TABLE growth_leads ADD COLUMN IF NOT EXISTS email_discovery_method TEXT;
+ALTER TABLE growth_leads ADD COLUMN IF NOT EXISTS email_source_url TEXT;
+ALTER TABLE growth_leads ADD COLUMN IF NOT EXISTS email_confidence TEXT;
 
 -- =========================
 -- Row Level Security (RLS)
 -- =========================
--- Enable RLS for multi-tenant safety.
--- The Python backend should use the Supabase SERVICE_ROLE key
--- which automatically bypasses RLS.
-
+-- Enable RLS on all tables
 ALTER TABLE growth_leads ENABLE ROW LEVEL SECURITY;
 ALTER TABLE growth_email_drafts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE growth_search_queries ENABLE ROW LEVEL SECURITY;
 
--- Authenticated users can read all growth data
--- Drop existing policies first to make this script safe to re-run
+-- DROP existing policies first (safe — IF EXISTS prevents errors)
+-- growth_leads
 DROP POLICY IF EXISTS "Authenticated users can read growth_leads" ON growth_leads;
 DROP POLICY IF EXISTS "Authenticated users can insert growth_leads" ON growth_leads;
 DROP POLICY IF EXISTS "Authenticated users can update growth_leads" ON growth_leads;
 DROP POLICY IF EXISTS "Authenticated users can delete growth_leads" ON growth_leads;
+
+-- growth_email_drafts
 DROP POLICY IF EXISTS "Authenticated users can read growth_email_drafts" ON growth_email_drafts;
 DROP POLICY IF EXISTS "Authenticated users can insert growth_email_drafts" ON growth_email_drafts;
 DROP POLICY IF EXISTS "Authenticated users can update growth_email_drafts" ON growth_email_drafts;
 DROP POLICY IF EXISTS "Authenticated users can delete growth_email_drafts" ON growth_email_drafts;
 
+-- growth_search_queries
+DROP POLICY IF EXISTS "Authenticated users can read growth_search_queries" ON growth_search_queries;
+DROP POLICY IF EXISTS "Authenticated users can insert growth_search_queries" ON growth_search_queries;
+DROP POLICY IF EXISTS "Authenticated users can update growth_search_queries" ON growth_search_queries;
+DROP POLICY IF EXISTS "Authenticated users can delete growth_search_queries" ON growth_search_queries;
+
+-- RE-CREATE all policies
+-- growth_leads
 CREATE POLICY "Authenticated users can read growth_leads"
     ON growth_leads FOR SELECT TO authenticated USING (true);
-
 CREATE POLICY "Authenticated users can insert growth_leads"
     ON growth_leads FOR INSERT TO authenticated WITH CHECK (true);
-
 CREATE POLICY "Authenticated users can update growth_leads"
     ON growth_leads FOR UPDATE TO authenticated USING (true);
-
 CREATE POLICY "Authenticated users can delete growth_leads"
     ON growth_leads FOR DELETE TO authenticated USING (true);
 
+-- growth_email_drafts
 CREATE POLICY "Authenticated users can read growth_email_drafts"
     ON growth_email_drafts FOR SELECT TO authenticated USING (true);
-
 CREATE POLICY "Authenticated users can insert growth_email_drafts"
     ON growth_email_drafts FOR INSERT TO authenticated WITH CHECK (true);
-
 CREATE POLICY "Authenticated users can update growth_email_drafts"
     ON growth_email_drafts FOR UPDATE TO authenticated USING (true);
-
 CREATE POLICY "Authenticated users can delete growth_email_drafts"
     ON growth_email_drafts FOR DELETE TO authenticated USING (true);
+
+-- growth_search_queries
+CREATE POLICY "Authenticated users can read growth_search_queries"
+    ON growth_search_queries FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Authenticated users can insert growth_search_queries"
+    ON growth_search_queries FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY "Authenticated users can update growth_search_queries"
+    ON growth_search_queries FOR UPDATE TO authenticated USING (true);
+CREATE POLICY "Authenticated users can delete growth_search_queries"
+    ON growth_search_queries FOR DELETE TO authenticated USING (true);
+
+-- ============================================================
+-- Done! All tables, indexes, and RLS policies are configured.
+-- ============================================================

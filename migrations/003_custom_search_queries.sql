@@ -20,6 +20,12 @@ CREATE INDEX IF NOT EXISTS idx_growth_search_queries_vertical
 -- RLS
 ALTER TABLE growth_search_queries ENABLE ROW LEVEL SECURITY;
 
+-- Drop existing policies first to make this script safe to re-run
+DROP POLICY IF EXISTS "Authenticated users can read growth_search_queries" ON growth_search_queries;
+DROP POLICY IF EXISTS "Authenticated users can insert growth_search_queries" ON growth_search_queries;
+DROP POLICY IF EXISTS "Authenticated users can update growth_search_queries" ON growth_search_queries;
+DROP POLICY IF EXISTS "Authenticated users can delete growth_search_queries" ON growth_search_queries;
+
 CREATE POLICY "Authenticated users can read growth_search_queries"
     ON growth_search_queries FOR SELECT TO authenticated USING (true);
 
