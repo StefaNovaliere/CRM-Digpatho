@@ -127,6 +127,7 @@ export const GrowthSystem = () => {
     loadLeads, loadDrafts, loadStats,
     updateDraftStatus, updateLead, promoteLeadToContact, ignoreLead,
     loadCustomQueries, addCustomQuery, updateCustomQuery, deleteCustomQuery,
+    enrichLeadEmails, enrichmentRunning, enrichmentResult, setEnrichmentResult,
     runPipeline, pipelineRunning, pipelineResult, setPipelineResult
   } = useGrowthSystem();
 
@@ -487,7 +488,76 @@ export const GrowthSystem = () => {
                   ({leads.length} {selectedVertical !== 'all' ? `en ${GROWTH_VERTICALS[selectedVertical]?.label}` : 'total'})
                 </span>
               </h2>
+
+              {/* Enrich emails button */}
+              {leads.length > 0 && (
+                <button
+                  onClick={() => {
+                    const withoutEmail = leads.filter(l => !l.email).map(l => l.id);
+                    if (withoutEmail.length === 0) {
+                      setEnrichmentResult({ found: 0, not_found: 0, total: 0, already_had_email: leads.length, allHaveEmail: true });
+                      return;
+                    }
+                    enrichLeadEmails(withoutEmail);
+                  }}
+                  disabled={enrichmentRunning}
+                  className="flex items-center gap-2 px-3 py-2 text-xs font-semibold text-violet-700 bg-violet-50 hover:bg-violet-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-wait"
+                >
+                  {enrichmentRunning ? (
+                    <>
+                      <RefreshCw size={13} className="animate-spin" />
+                      Buscando emails...
+                    </>
+                  ) : (
+                    <>
+                      <AtSign size={13} />
+                      Buscar emails ({leads.filter(l => !l.email).length} sin email)
+                    </>
+                  )}
+                </button>
+              )}
             </div>
+
+            {/* Enrichment results banner */}
+            {enrichmentResult && (
+              <div className={`px-6 py-3 border-b flex items-center justify-between ${
+                enrichmentResult.error
+                  ? 'bg-red-50 border-red-200'
+                  : enrichmentResult.allHaveEmail
+                    ? 'bg-blue-50 border-blue-200'
+                    : enrichmentResult.found > 0
+                      ? 'bg-green-50 border-green-200'
+                      : 'bg-amber-50 border-amber-200'
+              }`}>
+                <div className="flex items-center gap-2 text-sm">
+                  {enrichmentResult.error ? (
+                    <span className="text-red-700">
+                      <AlertCircle size={14} className="inline mr-1" />
+                      {enrichmentResult.error}
+                    </span>
+                  ) : enrichmentResult.allHaveEmail ? (
+                    <span className="text-blue-700">
+                      <CheckCircle size={14} className="inline mr-1" />
+                      Todos los leads ya tienen email asignado.
+                    </span>
+                  ) : (
+                    <span className={enrichmentResult.found > 0 ? 'text-green-700' : 'text-amber-700'}>
+                      <CheckCircle size={14} className="inline mr-1" />
+                      Búsqueda completada:
+                      {enrichmentResult.found > 0 && <strong> {enrichmentResult.found} emails encontrados.</strong>}
+                      {enrichmentResult.not_found > 0 && <span> {enrichmentResult.not_found} no encontrados.</span>}
+                      {enrichmentResult.already_had_email > 0 && <span> {enrichmentResult.already_had_email} ya tenían email.</span>}
+                    </span>
+                  )}
+                </div>
+                <button
+                  onClick={() => setEnrichmentResult(null)}
+                  className="p-1 text-gray-400 hover:text-gray-600"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            )}
 
             {loading ? (
               <div className="p-12 text-center">

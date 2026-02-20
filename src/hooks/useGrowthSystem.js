@@ -12,6 +12,8 @@ export const useGrowthSystem = () => {
   const [error, setError] = useState(null);
   const [pipelineRunning, setPipelineRunning] = useState(null); // vertical key or null
   const [pipelineResult, setPipelineResult] = useState(null);
+  const [enrichmentRunning, setEnrichmentRunning] = useState(false);
+  const [enrichmentResult, setEnrichmentResult] = useState(null);
   const [stats, setStats] = useState({
     totalLeads: 0,
     newLeads: 0,
@@ -355,6 +357,55 @@ export const useGrowthSystem = () => {
   }, []);
 
   // ========================================
+  // EMAIL ENRICHMENT (Apollo.io)
+  // ========================================
+  const enrichLeadEmails = useCallback(async (leadIds) => {
+    setEnrichmentRunning(true);
+    setEnrichmentResult(null);
+    setError(null);
+    try {
+      const response = await fetch('/api/email-enrichment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lead_ids: leadIds }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Error en la búsqueda de emails');
+      }
+
+      const results = data.results;
+      setEnrichmentResult(results);
+
+      // Update local leads with found emails
+      if (results.details) {
+        const foundEmails = {};
+        for (const detail of results.details) {
+          if (detail.status === 'found' && detail.email) {
+            foundEmails[detail.lead_id] = detail.email;
+          }
+        }
+        if (Object.keys(foundEmails).length > 0) {
+          setLeads(prev => prev.map(l =>
+            foundEmails[l.id] ? { ...l, email: foundEmails[l.id] } : l
+          ));
+        }
+      }
+
+      return results;
+    } catch (err) {
+      console.error('Error enriching emails:', err);
+      setError(err.message);
+      setEnrichmentResult({ error: err.message });
+      return null;
+    } finally {
+      setEnrichmentRunning(false);
+    }
+  }, []);
+
+  // ========================================
   // PIPELINE EXECUTION
   // ========================================
   const runPipeline = useCallback(async (vertical, mode = 'full') => {
@@ -403,6 +454,10 @@ export const useGrowthSystem = () => {
     addCustomQuery,
     updateCustomQuery,
     deleteCustomQuery,
+    enrichLeadEmails,
+    enrichmentRunning,
+    enrichmentResult,
+    setEnrichmentResult,
     runPipeline,
     pipelineRunning,
     pipelineResult,
