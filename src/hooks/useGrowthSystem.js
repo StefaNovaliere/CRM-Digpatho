@@ -402,7 +402,14 @@ export const useGrowthSystem = () => {
           body: JSON.stringify({ lead_ids: batch }),
         });
 
-        const data = await response.json();
+        // Handle non-JSON responses (Vercel errors, timeouts, HTML error pages)
+        const responseText = await response.text();
+        let data;
+        try {
+          data = JSON.parse(responseText);
+        } catch (_) {
+          throw new Error(`API error (${response.status}): ${responseText.slice(0, 150)}`);
+        }
 
         if (!response.ok) {
           throw new Error(data.error || 'Error en AI email discovery');
