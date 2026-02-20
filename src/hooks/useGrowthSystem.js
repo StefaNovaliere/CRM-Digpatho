@@ -673,7 +673,7 @@ Responde EXACTAMENTE en este formato:
           'anthropic-dangerous-direct-browser-access': 'true',
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-6',
+          model: 'claude-sonnet-4-5-20250929',
           max_tokens: 2000,
           messages: [{ role: 'user', content: prompt }],
         }),

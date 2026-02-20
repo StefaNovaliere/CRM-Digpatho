@@ -77,7 +77,7 @@ async function enrichDescriptionViaAI(apiKey, lead) {
   if (!prompt) return { description: null, error: 'No name available' };
 
   const requestBody = JSON.stringify({
-    model: 'claude-sonnet-4-6',
+    model: 'claude-sonnet-4-5-20250929',
     max_tokens: 4096,
     messages: [
       { role: 'user', content: prompt },

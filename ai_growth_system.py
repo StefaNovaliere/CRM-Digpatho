@@ -1600,7 +1600,7 @@ class ContextualCopywriter:
     """
 
     ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
-    ANTHROPIC_MODEL = "claude-sonnet-4-6"
+    ANTHROPIC_MODEL = "claude-sonnet-4-5-20250929"
 
     def __init__(self, supabase_client: Any, dry_run: bool = False):
         self.db = supabase_client

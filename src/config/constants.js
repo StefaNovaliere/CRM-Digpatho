@@ -154,7 +154,7 @@ export const APP_CONFIG = {
 
 // Modelos de IA disponibles
 export const AI_MODELS = {
-  default: 'claude-sonnet-4-6',
+  default: 'claude-sonnet-4-5-20250929',
   fast: 'claude-haiku-4-5-20251001'
 };
 

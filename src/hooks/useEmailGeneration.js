@@ -96,7 +96,7 @@ export const useEmailGeneration = () => {
           'anthropic-dangerous-direct-browser-access': 'true'
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-6',
+          model: 'claude-sonnet-4-5-20250929',
           max_tokens: 1500,
           system: systemPrompt,
           messages: [
@@ -107,14 +107,17 @@ export const useEmailGeneration = () => {
 
       if (!response.ok) {
         const errorData = await response.json();
+        console.error('[Email Gen] API error:', response.status, errorData);
         throw new Error(errorData.error?.message || 'Error al generar email');
       }
 
       const data = await response.json();
       const generatedText = data.content[0].text;
+      console.log('[Email Gen] Raw AI response:', generatedText.substring(0, 200));
 
       // 6. Parsear el resultado
       const parsed = parseEmailResponse(generatedText);
+      console.log('[Email Gen] Parsed result:', { subject: parsed.subject?.substring(0, 50), bodyLen: parsed.body?.length });
 
       // 7. Guardar borrador
       const { data: draft, error: draftError } = await supabase
@@ -135,7 +138,7 @@ export const useEmailGeneration = () => {
               institution: contact.institution?.name
             }
           },
-          ai_model: 'claude-sonnet-4-6'
+          ai_model: 'claude-sonnet-4-5-20250929'
         })
         .select()
         .single();
