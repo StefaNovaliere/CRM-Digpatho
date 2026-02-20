@@ -575,7 +575,7 @@ export const GrowthSystem = () => {
                         )}
 
                         {/* Promote to CRM */}
-                        {lead.status !== 'promoted' && lead.status !== 'ignored' && (
+                        {lead.status !== 'promoted' && (
                           <button
                             onClick={(e) => { e.stopPropagation(); handlePromote(lead); }}
                             disabled={promoting === lead.id}
@@ -590,16 +590,14 @@ export const GrowthSystem = () => {
                           </button>
                         )}
 
-                        {/* Ignore */}
-                        {lead.status !== 'promoted' && lead.status !== 'ignored' && (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleIgnore(lead.id); }}
-                            className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                            title="Descartar lead"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        )}
+                        {/* Delete permanently */}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleIgnore(lead.id); }}
+                          className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                          title="Eliminar lead"
+                        >
+                          <Trash2 size={16} />
+                        </button>
                       </div>
                     </div>
                   </div>

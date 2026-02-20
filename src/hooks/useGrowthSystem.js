@@ -32,6 +32,7 @@ export const useGrowthSystem = () => {
       let query = supabase
         .from('growth_leads')
         .select('*')
+        .neq('status', 'ignored') // hide legacy ignored leads
         .order('created_at', { ascending: false });
 
       if (filters.vertical && filters.vertical !== 'all') {
@@ -73,8 +74,9 @@ export const useGrowthSystem = () => {
         .select('id, vertical, status');
       if (draftsErr) throw draftsErr;
 
-      const leads = allLeads || [];
       const drafts = allDrafts || [];
+      // Exclude ignored leads from all counts (legacy data)
+      const leads = (allLeads || []).filter(l => l.status !== 'ignored');
 
       const byVertical = {};
       leads.forEach(l => {
@@ -232,9 +234,24 @@ export const useGrowthSystem = () => {
     }
   }, [updateLeadStatus]);
 
+  // Delete lead permanently from the database
   const ignoreLead = useCallback(async (leadId) => {
-    return updateLeadStatus(leadId, 'ignored');
-  }, [updateLeadStatus]);
+    try {
+      const { error: deleteErr } = await supabase
+        .from('growth_leads')
+        .delete()
+        .eq('id', leadId);
+
+      if (deleteErr) throw deleteErr;
+
+      setLeads(prev => prev.filter(l => l.id !== leadId));
+      return true;
+    } catch (err) {
+      console.error('Error deleting lead:', err);
+      setError(err.message);
+      return false;
+    }
+  }, []);
 
   // Update lead fields (for editing in detail modal)
   const updateLead = useCallback(async (leadId, fields) => {
