@@ -549,29 +549,161 @@ export const useGrowthSystem = () => {
   }, []);
 
   // ========================================
-  // DRAFT REGENERATION (Anthropic AI — personalized to lead)
+  // DRAFT REGENERATION (Anthropic AI — personalized to lead, client-side)
   // ========================================
-  const regenerateDraft = useCallback(async (draftId) => {
+  const regenerateDraft = useCallback(async (draft) => {
+    const lead = draft?.lead || {};
+    const vertical = draft?.vertical || 'DIRECT_B2B';
+
+    const VERTICAL_STRATEGIES = {
+      DIRECT_B2B: {
+        objective: 'Vender el servicio SaaS de Digpatho a laboratorios y centros de referencia. El lead es un potencial comprador directo.',
+        tone: 'Operacional, enfocado en ROI y resultados medibles.',
+        cta: 'Agendar una demo de 15 minutos.',
+        key_points: [
+          'Escasez global de patólogos (40,000 estimados)',
+          'Plataforma de análisis celular con IA: 5-10x más rápido que microscopía manual, 95% precisión',
+          'Modelo SaaS sin inversión inicial en escáneres ($50K-$300K ahorrados)',
+          'Pilotos activos en Instituto Oulton (Argentina) y UCH (Nigeria)',
+          'Ahorro de $1,300 USD por caso, 28% reducción en turnaround',
+        ],
+      },
+      PHARMA: {
+        objective: 'Establecer partnerships con empresas pharma para companion diagnostics (CDx) y ensayos clínicos. El lead trabaja en pharma o CROs.',
+        tone: 'Científico-estratégico. Hablar de data, validación, y estrategia clínica.',
+        cta: 'Coordinar un briefing técnico de 30 minutos.',
+        key_points: [
+          'DESTINY-Breast06 expandió la relevancia de HER2-low (IHC 1+ y 2+/ISH-)',
+          'Cuantificación objetiva y reproducible de HER2-low entre sitios',
+          'Estandarización de biomarcadores (Ki-67, HER2) para ensayos multi-sitio',
+          'Pre-screening en tiempo real de H&E e IHC',
+          'Presencia validada en LATAM y África — donde PathAI y Paige no operan',
+        ],
+      },
+      INFLUENCER: {
+        objective: 'Colaborar con thought leaders, periodistas, editores y creadores de contenido para amplificar la visibilidad de Digpatho.',
+        tone: 'Colaborativo, peer-to-peer. No es venta, es propuesta de contenido conjunto.',
+        cta: 'Agendar una llamada para explorar colaboración de contenido.',
+        key_points: [
+          'IA en patología del Global South — historia poco cubierta',
+          'Pilotos en UCH (Nigeria) y Wits University (Sudáfrica) con datos de impacto clínico',
+          'Ángulos posibles: guest posts, casos de estudio, narrativa de leapfrogging',
+          'África saltando de portaobjetos a telepatología con IA',
+        ],
+      },
+      EVENTS: {
+        objective: 'Conseguir reuniones presenciales en conferencias y eventos del sector.',
+        tone: 'Directo, conciso, máximo 5-7 líneas. Al grano.',
+        cta: 'Reunión de 15 minutos durante el evento.',
+        key_points: [
+          'Demo en vivo de la plataforma (95% precisión diagnóstica)',
+          'Mantener el email extremadamente breve',
+        ],
+      },
+    };
+
+    const strategy = VERTICAL_STRATEGIES[vertical] || VERTICAL_STRATEGIES.DIRECT_B2B;
+    const description = (lead.extra_data?.description || '').replace(/<\/?cite[^>]*>/gi, '');
+    const languageMap = { en: 'English', es: 'Español', pt: 'Português' };
+    const language = draft.language || 'es';
+    const languageName = languageMap[language] || 'Español';
+
+    const prompt = `Eres un asistente de comunicación comercial de Digpatho IA, una startup argentina de biotecnología especializada en patología digital con IA.
+
+## CONTEXTO DE LA EMPRESA
+- **Digpatho IA**: Startup argentina de patología digital.
+- **Trayectoria**: Herramientas para automatizar biomarcadores en cáncer de mama (HER2, Ki67, RE, RP).
+- **Propuesta de valor**: Reducir variabilidad inter-observador y ahorrar tiempo en conteo celular.
+- **Diferenciadores**: Tecnología validada en LATAM y África, reportes automáticos, modelo SaaS accesible.
+
+## OBJETIVO DEL EMAIL (VERTICAL: ${vertical})
+${strategy.objective}
+
+**Tono requerido:** ${strategy.tone}
+**Call-to-action:** ${strategy.cta}
+
+**Puntos clave a considerar (usar los más relevantes para este lead):**
+${strategy.key_points.map(p => `- ${p}`).join('\n')}
+
+## DATOS DEL LEAD (PERSONALIZAR EL EMAIL A ESTA PERSONA)
+- **Nombre completo:** ${lead.full_name || '[Sin nombre]'}
+- **Cargo:** ${lead.job_title || '[Sin cargo]'}
+- **Empresa/Institución:** ${lead.company || '[Sin empresa]'}
+- **Geografía:** ${lead.geo || 'No especificada'}
+- **Email:** ${lead.email || 'No disponible'}
+- **LinkedIn:** ${lead.linkedin_url || 'No disponible'}
+${description ? `\n**Descripción enriquecida del lead (USAR PARA PERSONALIZAR):**\n${description}` : ''}
+
+## BORRADOR ORIGINAL (REFERENCIA)
+El siguiente es el borrador genérico original. Tu tarea es regenerarlo personalizado a este lead específico:
+
+**Asunto original:** ${draft.subject}
+**Cuerpo original:**
+${draft.body}
+
+## INSTRUCCIONES
+1. **Mantener el OBJETIVO del vertical**: El propósito del email debe seguir siendo ${strategy.objective.toLowerCase().slice(0, 80)}...
+2. **Personalizar profundamente**: Usa los datos del lead (nombre, cargo, empresa, descripción enriquecida) para hacer referencias específicas a su trabajo, su institución, o su área de expertise.
+3. **Si hay descripción enriquecida**: Úsala para encontrar puntos de conexión reales — publicaciones, roles, áreas de interés, logros — y mencionarlos en el email.
+4. **Si NO hay descripción**: Personaliza usando los datos básicos (nombre, cargo, empresa, geo) de forma inteligente.
+5. **No inventar**: No atribuyas publicaciones, logros o datos que no estén en la información proporcionada.
+6. **Idioma**: Escribir en **${languageName}**.
+7. **Formato**: Usar el mismo nivel de formalidad que el borrador original.
+
+## FORMATO DE RESPUESTA
+Responde EXACTAMENTE en este formato:
+
+**Asunto:** [Línea de asunto personalizada]
+
+**Cuerpo:**
+[Contenido del email personalizado]`;
+
     try {
-      const response = await fetch('/api/regenerate-draft', {
+      const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
+      if (!apiKey) {
+        throw new Error('VITE_ANTHROPIC_API_KEY no está configurada.');
+      }
+
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ draft_id: draftId }),
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 2000,
+          messages: [{ role: 'user', content: prompt }],
+        }),
       });
 
-      const responseText = await response.text();
-      let data;
-      try {
-        data = JSON.parse(responseText);
-      } catch (_) {
-        throw new Error(`Error del servidor (${response.status}): ${responseText.slice(0, 150)}`);
-      }
-
       if (!response.ok) {
-        throw new Error(data.message || data.error || 'Error regenerando borrador');
+        const errText = await response.text();
+        let errMsg = 'Error regenerando borrador';
+        try {
+          const errJson = JSON.parse(errText);
+          errMsg = errJson.error?.message || errMsg;
+        } catch (_) { /* use default */ }
+        throw new Error(errMsg);
       }
 
-      return data;
+      const data = await response.json();
+      const textBlocks = (data.content || []).filter(b => b.type === 'text');
+      if (textBlocks.length === 0) throw new Error('No se recibió respuesta del modelo.');
+
+      const text = textBlocks.map(b => b.text).join('\n');
+      const subjectMatch = text.match(/\*\*Asunto:\*\*\s*(.+?)(?=\n|$)/i);
+      const bodyMatch = text.match(/\*\*Cuerpo:\*\*\s*([\s\S]*?)$/i);
+
+      return {
+        success: true,
+        result: {
+          subject: subjectMatch ? subjectMatch[1].trim() : null,
+          body: bodyMatch ? bodyMatch[1].trim() : text.trim(),
+        },
+      };
     } catch (err) {
       console.error('Error regenerating draft:', err);
       throw err;
