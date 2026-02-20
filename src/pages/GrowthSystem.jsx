@@ -132,6 +132,7 @@ export const GrowthSystem = () => {
     updateDraftStatus, updateDraftContent, updateLead, promoteLeadToContact, ignoreLead,
     loadCustomQueries, addCustomQuery, updateCustomQuery, deleteCustomQuery,
     enrichLeadDescription,
+    regenerateDraft,
     runPipeline, pipelineRunning, pipelineResult, setPipelineResult
   } = useGrowthSystem();
 
@@ -928,6 +929,7 @@ export const GrowthSystem = () => {
             }
             return ok;
           }}
+          onRegenerate={regenerateDraft}
         />
       )}
 

@@ -549,6 +549,36 @@ export const useGrowthSystem = () => {
   }, []);
 
   // ========================================
+  // DRAFT REGENERATION (Anthropic AI — personalized to lead)
+  // ========================================
+  const regenerateDraft = useCallback(async (draftId) => {
+    try {
+      const response = await fetch('/api/regenerate-draft', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ draft_id: draftId }),
+      });
+
+      const responseText = await response.text();
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch (_) {
+        throw new Error(`Error del servidor (${response.status}): ${responseText.slice(0, 150)}`);
+      }
+
+      if (!response.ok) {
+        throw new Error(data.message || data.error || 'Error regenerando borrador');
+      }
+
+      return data;
+    } catch (err) {
+      console.error('Error regenerating draft:', err);
+      throw err;
+    }
+  }, []);
+
+  // ========================================
   // PIPELINE EXECUTION
   // ========================================
   const runPipeline = useCallback(async (vertical, mode = 'full') => {
@@ -600,6 +630,7 @@ export const useGrowthSystem = () => {
     deleteCustomQuery,
     discoverLeadEmails,
     enrichLeadDescription,
+    regenerateDraft,
     enrichmentRunning,
     enrichmentResult,
     setEnrichmentResult,
