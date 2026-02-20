@@ -130,6 +130,7 @@ export const GrowthSystem = () => {
     loadLeads, loadDrafts, loadStats,
     updateDraftStatus, updateDraftContent, updateLead, promoteLeadToContact, ignoreLead,
     loadCustomQueries, addCustomQuery, updateCustomQuery, deleteCustomQuery,
+    enrichLeadDescription,
     runPipeline, pipelineRunning, pipelineResult, setPipelineResult
   } = useGrowthSystem();
 
@@ -873,6 +874,7 @@ export const GrowthSystem = () => {
             const v = selectedVertical === 'all' ? null : selectedVertical;
             loadLeads({ vertical: v, search: searchQuery || null });
           }}
+          onEnrichDescription={enrichLeadDescription}
         />
       )}
 

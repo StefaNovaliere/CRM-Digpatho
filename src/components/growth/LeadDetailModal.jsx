@@ -17,7 +17,9 @@ import {
   FileText,
   Search,
   RefreshCw,
-  AlertCircle
+  AlertCircle,
+  Sparkles,
+  CheckCircle2
 } from 'lucide-react';
 import { GROWTH_VERTICALS } from '../../config/constants';
 
@@ -28,7 +30,7 @@ const verticalColors = {
   EVENTS: 'from-emerald-500 to-teal-500',
 };
 
-export const LeadDetailModal = ({ lead, onClose, onSave, onPromote, onIgnore }) => {
+export const LeadDetailModal = ({ lead, onClose, onSave, onPromote, onIgnore, onEnrichDescription }) => {
   const [form, setForm] = useState({
     full_name: lead.full_name || '',
     first_name: lead.first_name || lead.full_name?.split(' ')[0] || '',
@@ -44,6 +46,9 @@ export const LeadDetailModal = ({ lead, onClose, onSave, onPromote, onIgnore }) 
   const [discovering, setDiscovering] = useState(false);
   const [discoveryResult, setDiscoveryResult] = useState(null);
   const [discoveryError, setDiscoveryError] = useState(null);
+  const [enriching, setEnriching] = useState(false);
+  const [enrichmentError, setEnrichmentError] = useState(null);
+  const [enrichmentDone, setEnrichmentDone] = useState(false);
 
   const verticalConfig = GROWTH_VERTICALS[lead.vertical] || {};
   const gradientClass = verticalColors[lead.vertical] || 'from-gray-500 to-gray-600';
@@ -123,7 +128,43 @@ export const LeadDetailModal = ({ lead, onClose, onSave, onPromote, onIgnore }) 
     }
   };
 
+  const handleEnrichDescription = async () => {
+    if (!onEnrichDescription) return;
+    setEnriching(true);
+    setEnrichmentError(null);
+    setEnrichmentDone(false);
+
+    try {
+      const data = await onEnrichDescription(lead.id);
+
+      if (data?.success && data.result?.description) {
+        setForm(prev => ({
+          ...prev,
+          extra_data: {
+            ...(prev.extra_data || {}),
+            description: data.result.description,
+            description_sources: data.result.sources || [],
+            description_enriched_at: new Date().toISOString(),
+            description_confidence: data.result.confidence || 'medium',
+            description_original: prev.extra_data?.description || null,
+          },
+        }));
+        setEnrichmentDone(true);
+      } else {
+        setEnrichmentError(
+          data?.result?.notes || 'No se encontró información adicional para este lead.'
+        );
+      }
+    } catch (err) {
+      console.error('Error enriching description:', err);
+      setEnrichmentError(err.message);
+    } finally {
+      setEnriching(false);
+    }
+  };
+
   const description = form.extra_data?.description || '';
+  const isDescriptionEnriched = !!form.extra_data?.description_enriched_at;
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto">
@@ -352,17 +393,85 @@ export const LeadDetailModal = ({ lead, onClose, onSave, onPromote, onIgnore }) 
             )}
 
             {/* Description / Snippet */}
-            {description && (
-              <div>
-                <label className="flex items-center gap-1.5 text-sm font-medium text-gray-700 mb-1">
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="flex items-center gap-1.5 text-sm font-medium text-gray-700">
                   <FileText size={14} />
                   Descripción
+                  {isDescriptionEnriched && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded-full bg-purple-50 text-purple-700">
+                      <Sparkles size={10} />
+                      Enriquecida con IA
+                    </span>
+                  )}
                 </label>
-                <div className="p-4 bg-gray-50 rounded-xl text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
+                {onEnrichDescription && !enriching && (
+                  <button
+                    onClick={handleEnrichDescription}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-lg transition-colors"
+                    title="Buscar información en la web con IA para generar una descripción más completa"
+                  >
+                    <Sparkles size={13} />
+                    {description ? 'Enriquecer con IA' : 'Generar con IA'}
+                  </button>
+                )}
+                {enriching && (
+                  <div className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-purple-600 bg-purple-50 border border-purple-200 rounded-lg">
+                    <RefreshCw size={13} className="animate-spin" />
+                    Investigando en la web...
+                  </div>
+                )}
+              </div>
+
+              {description ? (
+                <div className="p-4 bg-gray-50 rounded-xl text-sm text-gray-700 leading-relaxed whitespace-pre-wrap max-h-64 overflow-y-auto">
                   {description}
                 </div>
-              </div>
-            )}
+              ) : !enriching && (
+                <div className="p-4 bg-gray-50 rounded-xl text-sm text-gray-400 italic text-center">
+                  Sin descripción. Usá "Generar con IA" para investigar este lead en la web.
+                </div>
+              )}
+
+              {/* Enrichment success indicator */}
+              {enrichmentDone && (
+                <div className="mt-1.5 flex items-center gap-1.5 text-xs text-green-600">
+                  <CheckCircle2 size={12} />
+                  <span>Descripción enriquecida y guardada</span>
+                </div>
+              )}
+
+              {/* Enrichment error */}
+              {enrichmentError && (
+                <div className="mt-1.5 flex items-start gap-1.5 text-xs text-red-600">
+                  <AlertCircle size={12} className="flex-shrink-0 mt-0.5" />
+                  <span>{enrichmentError}</span>
+                </div>
+              )}
+
+              {/* Source URLs from enrichment */}
+              {form.extra_data?.description_sources?.length > 0 && (
+                <div className="mt-1.5 flex items-center gap-2 flex-wrap">
+                  <span className="text-[10px] text-gray-500">Fuentes:</span>
+                  {form.extra_data.description_sources.slice(0, 3).map((url, i) => (
+                    <a
+                      key={i}
+                      href={url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[10px] text-blue-600 hover:underline truncate max-w-[200px]"
+                    >
+                      {new URL(url).hostname}
+                    </a>
+                  ))}
+                  {form.extra_data.description_sources.length > 3 && (
+                    <span className="text-[10px] text-gray-400">
+                      +{form.extra_data.description_sources.length - 3} más
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Footer */}
