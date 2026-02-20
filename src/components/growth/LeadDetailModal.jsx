@@ -16,7 +16,8 @@ import {
   User,
   FileText,
   Search,
-  RefreshCw
+  RefreshCw,
+  AlertCircle
 } from 'lucide-react';
 import { GROWTH_VERTICALS } from '../../config/constants';
 
@@ -40,6 +41,9 @@ export const LeadDetailModal = ({ lead, onClose, onSave, onPromote, onIgnore }) 
   });
   const [saving, setSaving] = useState(false);
   const [promoting, setPromoting] = useState(false);
+  const [discovering, setDiscovering] = useState(false);
+  const [discoveryResult, setDiscoveryResult] = useState(null);
+  const [discoveryError, setDiscoveryError] = useState(null);
 
   const verticalConfig = GROWTH_VERTICALS[lead.vertical] || {};
   const gradientClass = verticalColors[lead.vertical] || 'from-gray-500 to-gray-600';
@@ -68,6 +72,55 @@ export const LeadDetailModal = ({ lead, onClose, onSave, onPromote, onIgnore }) 
     setPromoting(true);
     await onPromote({ ...lead, ...form });
     setPromoting(false);
+  };
+
+  const handleDiscoverEmail = async () => {
+    setDiscovering(true);
+    setDiscoveryResult(null);
+    setDiscoveryError(null);
+
+    try {
+      const response = await fetch('/api/email-discovery-ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lead_ids: [lead.id] }),
+      });
+
+      const responseText = await response.text();
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch (_) {
+        throw new Error(`Error del servidor (${response.status}): ${responseText.slice(0, 150)}`);
+      }
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Error en la búsqueda de email');
+      }
+
+      const detail = data.results?.details?.[0];
+
+      if (detail?.status === 'found' && detail.email) {
+        setForm(prev => ({ ...prev, email: detail.email }));
+        setDiscoveryResult({
+          email: detail.email,
+          confidence: detail.confidence,
+          source_url: detail.source_url,
+          source_description: detail.source_description,
+          alternative_emails: detail.alternative_emails || [],
+          notes: detail.notes,
+        });
+      } else if (detail?.status === 'rate_limited') {
+        setDiscoveryError('Límite de API alcanzado. Intentá de nuevo en unos minutos.');
+      } else {
+        setDiscoveryError(detail?.notes || 'No se encontró un email para este lead.');
+      }
+    } catch (err) {
+      console.error('Error discovering email:', err);
+      setDiscoveryError(err.message);
+    } finally {
+      setDiscovering(false);
+    }
   };
 
   const description = form.extra_data?.description || '';
@@ -153,19 +206,79 @@ export const LeadDetailModal = ({ lead, onClose, onSave, onPromote, onIgnore }) 
                   <AtSign size={14} />
                   Email
                 </label>
-                <input
-                  type="email"
-                  value={form.email}
-                  onChange={(e) => handleChange('email', e.target.value)}
-                  className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none text-sm"
-                  placeholder="Agregar email manualmente..."
-                />
-                {!form.email && (
+                <div className="flex gap-2">
+                  <input
+                    type="email"
+                    value={form.email}
+                    onChange={(e) => handleChange('email', e.target.value)}
+                    className="flex-1 px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none text-sm"
+                    placeholder="Agregar email manualmente..."
+                  />
+                  {!form.email && !discovering && (
+                    <button
+                      onClick={handleDiscoverEmail}
+                      className="flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-xl transition-colors whitespace-nowrap"
+                      title="Buscar email con IA"
+                    >
+                      <Search size={14} />
+                      Buscar
+                    </button>
+                  )}
+                  {discovering && (
+                    <div className="flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-xl whitespace-nowrap">
+                      <RefreshCw size={14} className="animate-spin" />
+                      Buscando...
+                    </div>
+                  )}
+                </div>
+
+                {/* Hint when no email and not yet searched */}
+                {!form.email && !discoveryResult && !discoveryError && !discovering && (
                   <p className="mt-1 text-xs text-amber-600">
-                    Podés agregar el email encontrado manualmente
+                    Agregá el email manualmente o buscalo con IA
                   </p>
                 )}
-                {lead.email_discovery_method && (
+
+                {/* Discovery error */}
+                {discoveryError && (
+                  <div className="mt-1.5 flex items-start gap-1.5 text-xs text-red-600">
+                    <AlertCircle size={12} className="flex-shrink-0 mt-0.5" />
+                    <span>{discoveryError}</span>
+                  </div>
+                )}
+
+                {/* Discovery success metadata (just found) */}
+                {discoveryResult && (
+                  <div className="mt-1.5 flex items-center gap-2 flex-wrap">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded-full bg-blue-50 text-blue-700">
+                      AI Web Search
+                    </span>
+                    {discoveryResult.confidence && (
+                      <span className={`inline-flex items-center px-2 py-0.5 text-[10px] font-medium rounded-full ${
+                        discoveryResult.confidence === 'high' ? 'bg-green-50 text-green-700' :
+                        discoveryResult.confidence === 'medium' ? 'bg-amber-50 text-amber-700' :
+                        'bg-red-50 text-red-700'
+                      }`}>
+                        {discoveryResult.confidence === 'high' ? 'Alta confianza' :
+                         discoveryResult.confidence === 'medium' ? 'Confianza media' :
+                         'Baja confianza'}
+                      </span>
+                    )}
+                    {discoveryResult.source_url && (
+                      <a
+                        href={discoveryResult.source_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[10px] text-blue-600 hover:underline truncate max-w-[200px]"
+                      >
+                        Fuente
+                      </a>
+                    )}
+                  </div>
+                )}
+
+                {/* Existing DB metadata (previously discovered) */}
+                {!discoveryResult && lead.email_discovery_method && (
                   <div className="mt-1.5 flex items-center gap-2 flex-wrap">
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded-full bg-blue-50 text-blue-700">
                       {lead.email_discovery_method === 'ai_web_search' ? 'AI Web Search' :
