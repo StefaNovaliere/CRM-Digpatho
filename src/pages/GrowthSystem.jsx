@@ -525,9 +525,11 @@ export const GrowthSystem = () => {
                   ? 'bg-red-50 border-red-200'
                   : enrichmentResult.allHaveEmail
                     ? 'bg-blue-50 border-blue-200'
-                    : enrichmentResult.found > 0
-                      ? 'bg-green-50 border-green-200'
-                      : 'bg-amber-50 border-amber-200'
+                    : enrichmentResult.processing
+                      ? 'bg-blue-50 border-blue-200'
+                      : enrichmentResult.found > 0
+                        ? 'bg-green-50 border-green-200'
+                        : 'bg-amber-50 border-amber-200'
               }`}>
                 <div className="flex items-center gap-2 text-sm">
                   {enrichmentResult.error ? (
@@ -540,13 +542,21 @@ export const GrowthSystem = () => {
                       <CheckCircle size={14} className="inline mr-1" />
                       Todos los leads ya tienen email asignado.
                     </span>
+                  ) : enrichmentResult.processing ? (
+                    <span className="text-blue-700">
+                      <RefreshCw size={14} className="inline mr-1 animate-spin" />
+                      {enrichmentResult.batchProgress || 'Procesando...'}
+                      {enrichmentResult.found > 0 && <span> ({enrichmentResult.found} encontrados hasta ahora)</span>}
+                    </span>
                   ) : (
                     <span className={enrichmentResult.found > 0 ? 'text-green-700' : 'text-amber-700'}>
                       <CheckCircle size={14} className="inline mr-1" />
-                      Búsqueda completada:
-                      {enrichmentResult.found > 0 && <strong> {enrichmentResult.found} emails encontrados.</strong>}
-                      {enrichmentResult.not_found > 0 && <span> {enrichmentResult.not_found} no encontrados.</span>}
+                      Búsqueda completada ({enrichmentResult.totalSubmitted || enrichmentResult.total} leads revisados):
+                      <strong> {enrichmentResult.found} emails encontrados.</strong>
+                      <span> {enrichmentResult.not_found} no encontrados.</span>
                       {enrichmentResult.already_had_email > 0 && <span> {enrichmentResult.already_had_email} ya tenían email.</span>}
+                      {enrichmentResult.errors > 0 && <span> {enrichmentResult.errors} errores.</span>}
+                      {enrichmentResult.rateLimitedRemaining > 0 && <span className="text-amber-600"> {enrichmentResult.rateLimitedRemaining} pendientes (límite de API alcanzado).</span>}
                     </span>
                   )}
                 </div>
