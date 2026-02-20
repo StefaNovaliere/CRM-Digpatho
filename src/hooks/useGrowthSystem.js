@@ -500,6 +500,55 @@ export const useGrowthSystem = () => {
   }, []);
 
   // ========================================
+  // LEAD DESCRIPTION ENRICHMENT (Anthropic AI + web_search)
+  // ========================================
+  const enrichLeadDescription = useCallback(async (leadId) => {
+    try {
+      const response = await fetch('/api/lead-enrich-description', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lead_id: leadId }),
+      });
+
+      const responseText = await response.text();
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch (_) {
+        throw new Error(`Error del servidor (${response.status}): ${responseText.slice(0, 150)}`);
+      }
+
+      if (!response.ok) {
+        throw new Error(data.message || data.error || 'Error enriqueciendo descripción');
+      }
+
+      if (data.success && data.result?.description) {
+        // Update local leads state with new description
+        setLeads(prev => prev.map(l =>
+          l.id === leadId
+            ? {
+                ...l,
+                extra_data: {
+                  ...(l.extra_data || {}),
+                  description: data.result.description,
+                  description_sources: data.result.sources || [],
+                  description_enriched_at: new Date().toISOString(),
+                  description_confidence: data.result.confidence || 'medium',
+                  description_original: l.extra_data?.description || null,
+                },
+              }
+            : l
+        ));
+      }
+
+      return data;
+    } catch (err) {
+      console.error('Error enriching lead description:', err);
+      throw err;
+    }
+  }, []);
+
+  // ========================================
   // PIPELINE EXECUTION
   // ========================================
   const runPipeline = useCallback(async (vertical, mode = 'full') => {
@@ -550,6 +599,7 @@ export const useGrowthSystem = () => {
     updateCustomQuery,
     deleteCustomQuery,
     discoverLeadEmails,
+    enrichLeadDescription,
     enrichmentRunning,
     enrichmentResult,
     setEnrichmentResult,
