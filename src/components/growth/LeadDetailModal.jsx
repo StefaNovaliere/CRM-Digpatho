@@ -163,7 +163,7 @@ export const LeadDetailModal = ({ lead, onClose, onSave, onPromote, onIgnore, on
     }
   };
 
-  const description = form.extra_data?.description || '';
+  const description = (form.extra_data?.description || '').replace(/<\/?cite[^>]*>/gi, '');
   const isDescriptionEnriched = !!form.extra_data?.description_enriched_at;
 
   return (

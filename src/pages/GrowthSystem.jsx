@@ -145,6 +145,20 @@ export const GrowthSystem = () => {
   const [draftSearchQuery, setDraftSearchQuery] = useState('');
   const [selectedLeadIds, setSelectedLeadIds] = useState(new Set());
   const [bulkProcessing, setBulkProcessing] = useState(false);
+  const [expandedDescriptions, setExpandedDescriptions] = useState(new Set());
+
+  // Strip <cite> tags from AI-generated descriptions
+  const stripCiteTags = (text) => text ? text.replace(/<\/?cite[^>]*>/gi, '') : '';
+
+  const toggleDescription = (leadId, e) => {
+    e.stopPropagation();
+    setExpandedDescriptions(prev => {
+      const next = new Set(prev);
+      if (next.has(leadId)) next.delete(leadId);
+      else next.add(leadId);
+      return next;
+    });
+  };
 
   // Multi-select helpers
   const toggleLeadSelection = (leadId, e) => {
@@ -688,12 +702,27 @@ export const GrowthSystem = () => {
                             </a>
                           )}
                         </div>
-                        {/* Description — full text, no truncation */}
-                        {lead.extra_data?.description && (
-                          <p className="mt-1.5 text-sm text-gray-600 leading-relaxed whitespace-pre-wrap break-words">
-                            {lead.extra_data.description}
-                          </p>
-                        )}
+                        {/* Description — collapsed by default, expandable */}
+                        {lead.extra_data?.description && (() => {
+                          const clean = stripCiteTags(lead.extra_data.description);
+                          const isLong = clean.length > 150;
+                          const isExpanded = expandedDescriptions.has(lead.id);
+                          return (
+                            <div className="mt-1.5">
+                              <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-wrap break-words">
+                                {isLong && !isExpanded ? clean.slice(0, 150).trimEnd() + '…' : clean}
+                              </p>
+                              {isLong && (
+                                <button
+                                  onClick={(e) => toggleDescription(lead.id, e)}
+                                  className="mt-0.5 text-xs text-blue-600 hover:text-blue-700 hover:underline"
+                                >
+                                  {isExpanded ? 'Ver menos' : 'Ver más'}
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </div>
 
                       <div className="flex items-center gap-2 flex-shrink-0">

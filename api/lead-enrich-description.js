@@ -149,6 +149,14 @@ async function enrichDescriptionViaAI(apiKey, lead) {
 }
 
 // ---------------------------------------------------------------------------
+// Strip <cite index="…">…</cite> tags from web_search responses
+// ---------------------------------------------------------------------------
+function stripCiteTags(text) {
+  if (!text) return text;
+  return text.replace(/<\/?cite[^>]*>/gi, '');
+}
+
+// ---------------------------------------------------------------------------
 // Parse the AI response — extract JSON
 // ---------------------------------------------------------------------------
 function parseEnrichmentResponse(apiResponse) {
@@ -164,7 +172,7 @@ function parseEnrichmentResponse(apiResponse) {
       const parsed = JSON.parse(jsonMatch[0]);
       if (parsed.description) {
         return {
-          description: parsed.description,
+          description: stripCiteTags(parsed.description),
           sources: parsed.sources || [],
           confidence: parsed.confidence || 'medium',
           sections_found: parsed.sections_found || [],
@@ -183,7 +191,7 @@ function parseEnrichmentResponse(apiResponse) {
   }
 
   // Fallback: use the entire text response as description if it's substantial
-  const cleanText = lastText.trim();
+  const cleanText = stripCiteTags(lastText.trim());
   if (cleanText.length > 100) {
     return {
       description: cleanText,
