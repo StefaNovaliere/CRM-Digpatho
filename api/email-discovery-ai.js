@@ -59,52 +59,88 @@ If you cannot find an email, set found to false and explain in notes why.`;
 }
 
 // ---------------------------------------------------------------------------
-// Call Anthropic API with web_search tool
+// Call Anthropic API with web_search tool (with retry + exponential backoff)
 // ---------------------------------------------------------------------------
+const RETRY_DELAYS = [3000, 6000, 12000]; // 3s, 6s, 12s
+
 async function discoverEmailViaAI(apiKey, lead) {
   const prompt = buildPrompt(lead);
   if (!prompt) return { email: null, error: 'No name available' };
 
-  try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
+  const requestBody = JSON.stringify({
+    model: 'claude-sonnet-4-20250514',
+    max_tokens: 1024,
+    messages: [
+      { role: 'user', content: prompt },
+    ],
+    tools: [
+      {
+        type: 'web_search_20250305',
+        name: 'web_search',
+        max_uses: 5,
       },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1024,
-        messages: [
-          { role: 'user', content: prompt },
-        ],
-        tools: [
-          {
-            type: 'web_search_20250305',
-            name: 'web_search',
-            max_uses: 5,
-          },
-        ],
-      }),
-    });
+    ],
+  });
 
-    if (!response.ok) {
+  const headers = {
+    'Content-Type': 'application/json',
+    'x-api-key': apiKey,
+    'anthropic-version': '2023-06-01',
+  };
+
+  let lastError = null;
+
+  // Try initial request + up to 3 retries
+  for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
+    try {
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers,
+        body: requestBody,
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        return parseAIResponse(data);
+      }
+
       const text = await response.text();
+      const isRetryable = response.status === 429 || response.status === 529;
+
+      if (isRetryable && attempt < RETRY_DELAYS.length) {
+        // Respect Retry-After header if present, otherwise use exponential backoff
+        const retryAfterHeader = response.headers.get('retry-after');
+        const delay = retryAfterHeader
+          ? Math.min(parseInt(retryAfterHeader, 10) * 1000, 30000)
+          : RETRY_DELAYS[attempt];
+
+        console.log(`Anthropic ${response.status} for "${lead.full_name}" — retry ${attempt + 1}/${RETRY_DELAYS.length} in ${delay}ms`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        lastError = { status: response.status, text: text.slice(0, 300) };
+        continue;
+      }
+
+      // Non-retryable error or retries exhausted
       if (response.status === 429) {
-        return { email: null, error: 'rate_limit', retryAfter: true };
+        return { email: null, error: 'rate_limit', apiError: text.slice(0, 300) };
       }
       if (response.status === 529) {
-        return { email: null, error: 'api_overloaded' };
+        return { email: null, error: 'api_overloaded', apiError: text.slice(0, 300) };
       }
-      return { email: null, error: `Anthropic API ${response.status}: ${text.slice(0, 200)}` };
+      return { email: null, error: `Anthropic API ${response.status}: ${text.slice(0, 300)}` };
+    } catch (err) {
+      if (attempt < RETRY_DELAYS.length) {
+        console.log(`Network error for "${lead.full_name}" — retry ${attempt + 1}/${RETRY_DELAYS.length}`);
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAYS[attempt]));
+        lastError = { status: 0, text: err.message };
+        continue;
+      }
+      return { email: null, error: err.message };
     }
-
-    const data = await response.json();
-    return parseAIResponse(data);
-  } catch (err) {
-    return { email: null, error: err.message };
   }
+
+  // All retries exhausted
+  return { email: null, error: 'rate_limit', apiError: lastError?.text || 'All retries exhausted' };
 }
 
 // ---------------------------------------------------------------------------
@@ -207,11 +243,15 @@ export default async function handler(req, res) {
       details: [],
     };
 
+    let consecutiveRateLimits = 0;
+
     for (let i = 0; i < leadsToSearch.length; i++) {
       const lead = leadsToSearch[i];
       const result = await discoverEmailViaAI(anthropicKey, lead);
 
       if (result.email) {
+        consecutiveRateLimits = 0; // Reset on success
+
         // Update lead email + discovery metadata in DB
         const updateData = {
           email: result.email,
@@ -250,16 +290,23 @@ export default async function handler(req, res) {
             notes: result.notes || null,
           });
         }
-      } else if (result.error === 'rate_limit') {
+      } else if (result.error === 'rate_limit' || result.error === 'api_overloaded') {
+        consecutiveRateLimits++;
         results.errors++;
         results.details.push({
           lead_id: lead.id,
           name: lead.full_name,
           status: 'rate_limited',
+          apiError: result.apiError || null,
         });
-        // Stop processing on rate limit
-        break;
+
+        // Only stop after 3 consecutive rate limits (API is genuinely throttling us)
+        if (consecutiveRateLimits >= 3) {
+          console.log(`3 consecutive rate limits — stopping. Last error: ${result.apiError}`);
+          break;
+        }
       } else {
+        consecutiveRateLimits = 0; // Reset on non-rate-limit responses
         results.not_found++;
         results.details.push({
           lead_id: lead.id,
