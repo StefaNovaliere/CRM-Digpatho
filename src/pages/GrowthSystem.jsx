@@ -170,12 +170,17 @@ export const GrowthSystem = () => {
   const handleBulkDelete = async () => {
     if (selectedLeadIds.size === 0) return;
     setBulkProcessing(true);
+    let failCount = 0;
     for (const id of selectedLeadIds) {
-      await ignoreLead(id);
+      const ok = await ignoreLead(id);
+      if (!ok) failCount++;
     }
     setSelectedLeadIds(new Set());
     loadStats();
     setBulkProcessing(false);
+    if (failCount > 0) {
+      alert(`No se pudieron eliminar ${failCount} lead(s). Verifique la consola para más detalles.`);
+    }
   };
 
   const handleBulkPromote = async () => {
