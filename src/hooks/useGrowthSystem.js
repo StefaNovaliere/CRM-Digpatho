@@ -165,6 +165,34 @@ export const useGrowthSystem = () => {
     }
   }, []);
 
+  const updateDraftContent = useCallback(async (draftId, fields) => {
+    try {
+      const allowedFields = ['subject', 'body'];
+      const updates = { updated_at: new Date().toISOString() };
+      for (const key of allowedFields) {
+        if (fields[key] !== undefined) {
+          updates[key] = fields[key];
+        }
+      }
+
+      const { error: updateErr } = await supabase
+        .from('growth_email_drafts')
+        .update(updates)
+        .eq('id', draftId);
+
+      if (updateErr) throw updateErr;
+
+      setDrafts(prev => prev.map(d =>
+        d.id === draftId ? { ...d, ...updates } : d
+      ));
+      return true;
+    } catch (err) {
+      console.error('Error updating draft content:', err);
+      setError(err.message);
+      return false;
+    }
+  }, []);
+
   // ========================================
   // LEAD ACTIONS
   // ========================================
@@ -507,6 +535,7 @@ export const useGrowthSystem = () => {
     loadDrafts,
     loadStats,
     updateDraftStatus,
+    updateDraftContent,
     updateLeadStatus,
     updateLead,
     promoteLeadToContact,

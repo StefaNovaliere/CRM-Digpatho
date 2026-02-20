@@ -21,7 +21,9 @@ import {
   ChevronDown,
   RefreshCw,
   AlertCircle,
-  FileText
+  FileText,
+  Pencil,
+  Save
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../hooks/useAuth';
@@ -34,10 +36,14 @@ const verticalColors = {
   EVENTS: 'from-emerald-500 to-teal-500',
 };
 
-export const DraftReviewModal = ({ draft, onClose, onApprove, onReject, onViewLead }) => {
+export const DraftReviewModal = ({ draft, onClose, onApprove, onReject, onViewLead, onSaveDraft }) => {
   const { user } = useAuth();
   const [notes, setNotes] = useState(draft?.reviewer_notes || '');
   const [copied, setCopied] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editSubject, setEditSubject] = useState(draft?.subject || '');
+  const [editBody, setEditBody] = useState(draft?.body || '');
+  const [saving, setSaving] = useState(false);
 
   // Campaign integration state
   const [showCampaignStep, setShowCampaignStep] = useState(false);
@@ -211,11 +217,31 @@ export const DraftReviewModal = ({ draft, onClose, onApprove, onReject, onViewLe
   };
 
   const handleCopy = () => {
+    const subject = isEditing ? editSubject : draft.subject;
+    const body = isEditing ? editBody : draft.body;
     navigator.clipboard.writeText(
-      `Asunto: ${draft.subject}\n\n${draft.body}`
+      `Asunto: ${subject}\n\n${body}`
     );
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleSaveDraft = async () => {
+    if (!onSaveDraft) return;
+    setSaving(true);
+    const ok = await onSaveDraft(draft.id, { subject: editSubject, body: editBody });
+    setSaving(false);
+    if (ok) {
+      draft.subject = editSubject;
+      draft.body = editBody;
+      setIsEditing(false);
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setEditSubject(draft.subject);
+    setEditBody(draft.body);
+    setIsEditing(false);
   };
 
   return (
@@ -329,20 +355,69 @@ export const DraftReviewModal = ({ draft, onClose, onApprove, onReject, onViewLe
                   )}
                 </div>
 
+                {/* Edit toggle */}
+                <div className="flex items-center justify-end">
+                  {!isEditing ? (
+                    <button
+                      onClick={() => setIsEditing(true)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-violet-600 bg-violet-50 hover:bg-violet-100 rounded-lg transition-colors"
+                    >
+                      <Pencil size={13} />
+                      Editar borrador
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={handleCancelEdit}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
+                      >
+                        <X size={13} />
+                        Cancelar
+                      </button>
+                      <button
+                        onClick={handleSaveDraft}
+                        disabled={saving}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-violet-600 hover:bg-violet-700 rounded-lg transition-colors disabled:opacity-50"
+                      >
+                        {saving ? <RefreshCw size={13} className="animate-spin" /> : <Save size={13} />}
+                        Guardar cambios
+                      </button>
+                    </div>
+                  )}
+                </div>
+
                 {/* Subject */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Asunto</label>
-                  <div className="p-3 bg-gray-50 rounded-xl text-gray-900 font-medium">
-                    {draft.subject}
-                  </div>
+                  {isEditing ? (
+                    <input
+                      type="text"
+                      value={editSubject}
+                      onChange={(e) => setEditSubject(e.target.value)}
+                      className="w-full px-4 py-3 bg-white border border-violet-300 rounded-xl focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 outline-none text-sm font-medium"
+                    />
+                  ) : (
+                    <div className="p-3 bg-gray-50 rounded-xl text-gray-900 font-medium">
+                      {draft.subject}
+                    </div>
+                  )}
                 </div>
 
                 {/* Body */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Cuerpo del email</label>
-                  <div className="p-4 bg-gray-50 rounded-xl text-gray-900 whitespace-pre-wrap max-h-72 overflow-y-auto text-sm leading-relaxed">
-                    {draft.body}
-                  </div>
+                  {isEditing ? (
+                    <textarea
+                      value={editBody}
+                      onChange={(e) => setEditBody(e.target.value)}
+                      rows={12}
+                      className="w-full px-4 py-3 bg-white border border-violet-300 rounded-xl focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 outline-none text-sm leading-relaxed resize-y"
+                    />
+                  ) : (
+                    <div className="p-4 bg-gray-50 rounded-xl text-gray-900 whitespace-pre-wrap max-h-72 overflow-y-auto text-sm leading-relaxed">
+                      {draft.body}
+                    </div>
+                  )}
                 </div>
 
                 {/* Generation context */}

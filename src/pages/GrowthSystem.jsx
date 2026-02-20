@@ -125,9 +125,8 @@ export const GrowthSystem = () => {
   const {
     leads, drafts, stats, loading, error,
     loadLeads, loadDrafts, loadStats,
-    updateDraftStatus, updateLead, promoteLeadToContact, ignoreLead,
+    updateDraftStatus, updateDraftContent, updateLead, promoteLeadToContact, ignoreLead,
     loadCustomQueries, addCustomQuery, updateCustomQuery, deleteCustomQuery,
-    discoverLeadEmails, enrichmentRunning, enrichmentResult, setEnrichmentResult,
     runPipeline, pipelineRunning, pipelineResult, setPipelineResult
   } = useGrowthSystem();
 
@@ -139,6 +138,7 @@ export const GrowthSystem = () => {
   const [promoting, setPromoting] = useState(null); // leadId being promoted
   const [showModeMenu, setShowModeMenu] = useState(null); // vertical key or null
   const [queryManagerVertical, setQueryManagerVertical] = useState(null); // vertical key or null
+  const [draftSearchQuery, setDraftSearchQuery] = useState('');
 
   // Pipeline execution
   const handleRunPipeline = async (vertical, mode) => {
@@ -213,6 +213,19 @@ export const GrowthSystem = () => {
 
   // Filter drafts for display
   const pendingDrafts = drafts.filter(d => d.status === 'draft_pending_review');
+
+  // Filter drafts by search query (lead name, company, or subject)
+  const filteredDrafts = draftSearchQuery.trim()
+    ? drafts.filter(d => {
+        const q = draftSearchQuery.toLowerCase();
+        const lead = d.lead || {};
+        return (
+          (lead.full_name && lead.full_name.toLowerCase().includes(q)) ||
+          (lead.company && lead.company.toLowerCase().includes(q)) ||
+          (d.subject && d.subject.toLowerCase().includes(q))
+        );
+      })
+    : drafts;
 
   return (
     <div className="p-6 max-w-7xl mx-auto animate-fade-in">
@@ -489,90 +502,8 @@ export const GrowthSystem = () => {
                 </span>
               </h2>
 
-              {/* AI Email Discovery button */}
-              {leads.length > 0 && (
-                <button
-                  onClick={() => {
-                    const withoutEmail = leads.filter(l => !l.email).map(l => l.id);
-                    if (withoutEmail.length === 0) {
-                      setEnrichmentResult({ found: 0, not_found: 0, total: 0, already_had_email: leads.length, allHaveEmail: true });
-                      return;
-                    }
-                    discoverLeadEmails(withoutEmail);
-                  }}
-                  disabled={enrichmentRunning}
-                  className="flex items-center gap-2 px-3 py-2 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-wait"
-                >
-                  {enrichmentRunning ? (
-                    <>
-                      <RefreshCw size={13} className="animate-spin" />
-                      AI buscando emails...
-                    </>
-                  ) : (
-                    <>
-                      <Globe size={13} />
-                      Buscar emails con IA ({leads.filter(l => !l.email).length} sin email)
-                    </>
-                  )}
-                </button>
-              )}
             </div>
 
-            {/* Enrichment results banner */}
-            {enrichmentResult && (
-              <div className={`px-6 py-3 border-b flex items-center justify-between ${
-                enrichmentResult.error
-                  ? 'bg-red-50 border-red-200'
-                  : enrichmentResult.allHaveEmail
-                    ? 'bg-blue-50 border-blue-200'
-                    : enrichmentResult.processing
-                      ? 'bg-blue-50 border-blue-200'
-                      : enrichmentResult.found > 0
-                        ? 'bg-green-50 border-green-200'
-                        : 'bg-amber-50 border-amber-200'
-              }`}>
-                <div className="flex items-center gap-2 text-sm">
-                  {enrichmentResult.error ? (
-                    <span className="text-red-700">
-                      <AlertCircle size={14} className="inline mr-1" />
-                      {enrichmentResult.error}
-                    </span>
-                  ) : enrichmentResult.allHaveEmail ? (
-                    <span className="text-blue-700">
-                      <CheckCircle size={14} className="inline mr-1" />
-                      Todos los leads ya tienen email asignado.
-                    </span>
-                  ) : enrichmentResult.processing ? (
-                    <span className="text-blue-700">
-                      <RefreshCw size={14} className="inline mr-1 animate-spin" />
-                      {enrichmentResult.batchProgress || 'Procesando...'}
-                      {enrichmentResult.found > 0 && <span> ({enrichmentResult.found} encontrados hasta ahora)</span>}
-                    </span>
-                  ) : (
-                    <span className={enrichmentResult.found > 0 ? 'text-green-700' : 'text-amber-700'}>
-                      <CheckCircle size={14} className="inline mr-1" />
-                      Búsqueda completada ({enrichmentResult.totalSubmitted || enrichmentResult.total} leads revisados):
-                      <strong> {enrichmentResult.found} emails encontrados.</strong>
-                      <span> {enrichmentResult.not_found} no encontrados.</span>
-                      {enrichmentResult.already_had_email > 0 && <span> {enrichmentResult.already_had_email} ya tenían email.</span>}
-                      {enrichmentResult.errors > 0 && <span> {enrichmentResult.errors} errores.</span>}
-                      {enrichmentResult.rateLimitedRemaining > 0 && <span className="text-amber-600"> {enrichmentResult.rateLimitedRemaining} pendientes (límite de API alcanzado).</span>}
-                      {enrichmentResult.rateLimitError && (
-                        <span className="block text-xs text-red-500 mt-1">
-                          Detalle API: {enrichmentResult.rateLimitError}
-                        </span>
-                      )}
-                    </span>
-                  )}
-                </div>
-                <button
-                  onClick={() => setEnrichmentResult(null)}
-                  className="p-1 text-gray-400 hover:text-gray-600"
-                >
-                  <X size={14} />
-                </button>
-              </div>
-            )}
 
             {loading ? (
               <div className="p-12 text-center">
@@ -695,13 +626,25 @@ export const GrowthSystem = () => {
         {/* DRAFTS TAB */}
         {activeTab === 'drafts' && (
           <>
-            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-              <h2 className="font-semibold text-gray-900">
-                Borradores de Email
-                <span className="ml-2 text-sm font-normal text-gray-500">
-                  ({pendingDrafts.length} pendientes de revisión)
-                </span>
-              </h2>
+            <div className="px-6 py-4 border-b border-gray-100 space-y-3">
+              <div className="flex items-center justify-between">
+                <h2 className="font-semibold text-gray-900">
+                  Borradores de Email
+                  <span className="ml-2 text-sm font-normal text-gray-500">
+                    ({pendingDrafts.length} pendientes de revisión)
+                  </span>
+                </h2>
+              </div>
+              <div className="relative max-w-md">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Buscar por nombre de lead, empresa o asunto..."
+                  value={draftSearchQuery}
+                  onChange={(e) => setDraftSearchQuery(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none text-sm"
+                />
+              </div>
             </div>
 
             {loading ? (
@@ -709,19 +652,22 @@ export const GrowthSystem = () => {
                 <RefreshCw className="w-8 h-8 text-gray-300 animate-spin mx-auto mb-3" />
                 <p className="text-gray-500">Cargando borradores...</p>
               </div>
-            ) : drafts.length === 0 ? (
+            ) : filteredDrafts.length === 0 ? (
               <div className="p-12 text-center">
                 <Mail className="w-12 h-12 text-gray-300 mx-auto mb-4" />
                 <h3 className="text-lg font-medium text-gray-900 mb-2">
-                  No hay borradores
+                  {draftSearchQuery.trim() ? 'Sin resultados' : 'No hay borradores'}
                 </h3>
                 <p className="text-gray-500 max-w-md mx-auto">
-                  Primero buscá leads y luego usá <strong>"Solo borradores"</strong> en cada vertical para generar emails.
+                  {draftSearchQuery.trim()
+                    ? `No se encontraron borradores para "${draftSearchQuery}".`
+                    : <>Primero buscá leads y luego usá <strong>"Solo borradores"</strong> en cada vertical para generar emails.</>
+                  }
                 </p>
               </div>
             ) : (
               <div className="divide-y divide-gray-100">
-                {drafts.map((draft) => {
+                {filteredDrafts.map((draft) => {
                   const lead = draft.lead || {};
                   return (
                     <div
@@ -820,6 +766,14 @@ export const GrowthSystem = () => {
           onViewLead={(lead) => {
             setSelectedDraft(null);
             setSelectedLead(lead);
+          }}
+          onSaveDraft={async (draftId, fields) => {
+            const ok = await updateDraftContent(draftId, fields);
+            if (ok) {
+              const v = selectedVertical === 'all' ? null : selectedVertical;
+              loadDrafts({ vertical: v });
+            }
+            return ok;
           }}
         />
       )}
