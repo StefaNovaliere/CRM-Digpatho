@@ -254,7 +254,7 @@ export const DraftReviewModal = ({ draft, onClose, onApprove, onReject, onViewLe
     setRegenerating(true);
     setRegenerateError(null);
     try {
-      const data = await onRegenerate(draft.id);
+      const data = await onRegenerate(draft);
       if (data?.success && data.result) {
         const newSubject = data.result.subject || editSubject;
         const newBody = data.result.body || editBody;
