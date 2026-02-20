@@ -252,21 +252,39 @@ export default async function handler(req, res) {
       if (result.email) {
         consecutiveRateLimits = 0; // Reset on success
 
-        // Update lead email + discovery metadata in DB
+        // Update lead email in DB
+        // Start with core fields that always exist
         const updateData = {
           email: result.email,
-          email_discovery_method: 'ai_web_search',
-          email_confidence: result.confidence || 'medium',
           updated_at: new Date().toISOString(),
         };
+
+        // Try with discovery metadata columns (from migration 005)
+        // If they don't exist, fall back to just updating the email
+        let updateErr;
+        const metadataFields = {
+          email_discovery_method: 'ai_web_search',
+          email_confidence: result.confidence || 'medium',
+        };
         if (result.sourceUrl) {
-          updateData.email_source_url = result.sourceUrl;
+          metadataFields.email_source_url = result.sourceUrl;
         }
 
-        const { error: updateErr } = await supabase
+        const { error: fullUpdateErr } = await supabase
           .from('growth_leads')
-          .update(updateData)
+          .update({ ...updateData, ...metadataFields })
           .eq('id', lead.id);
+
+        if (fullUpdateErr && fullUpdateErr.message?.includes('column')) {
+          // Metadata columns don't exist yet — update just the email
+          const { error: fallbackErr } = await supabase
+            .from('growth_leads')
+            .update(updateData)
+            .eq('id', lead.id);
+          updateErr = fallbackErr;
+        } else {
+          updateErr = fullUpdateErr;
+        }
 
         if (updateErr) {
           results.errors++;
