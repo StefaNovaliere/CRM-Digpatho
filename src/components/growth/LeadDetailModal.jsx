@@ -165,6 +165,36 @@ export const LeadDetailModal = ({ lead, onClose, onSave, onPromote, onIgnore }) 
                     Podés agregar el email encontrado manualmente
                   </p>
                 )}
+                {lead.email_discovery_method && (
+                  <div className="mt-1.5 flex items-center gap-2 flex-wrap">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded-full bg-blue-50 text-blue-700">
+                      {lead.email_discovery_method === 'ai_web_search' ? 'AI Web Search' :
+                       lead.email_discovery_method === 'google_snippet' ? 'Google Snippet' :
+                       'Manual'}
+                    </span>
+                    {lead.email_confidence && (
+                      <span className={`inline-flex items-center px-2 py-0.5 text-[10px] font-medium rounded-full ${
+                        lead.email_confidence === 'high' ? 'bg-green-50 text-green-700' :
+                        lead.email_confidence === 'medium' ? 'bg-amber-50 text-amber-700' :
+                        'bg-red-50 text-red-700'
+                      }`}>
+                        {lead.email_confidence === 'high' ? 'Alta confianza' :
+                         lead.email_confidence === 'medium' ? 'Confianza media' :
+                         'Baja confianza'}
+                      </span>
+                    )}
+                    {lead.email_source_url && (
+                      <a
+                        href={lead.email_source_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[10px] text-blue-600 hover:underline truncate max-w-[200px]"
+                      >
+                        Fuente
+                      </a>
+                    )}
+                  </div>
+                )}
               </div>
               <div>
                 <label className="flex items-center gap-1.5 text-sm font-medium text-gray-700 mb-1">

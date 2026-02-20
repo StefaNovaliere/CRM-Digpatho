@@ -127,7 +127,7 @@ export const GrowthSystem = () => {
     loadLeads, loadDrafts, loadStats,
     updateDraftStatus, updateLead, promoteLeadToContact, ignoreLead,
     loadCustomQueries, addCustomQuery, updateCustomQuery, deleteCustomQuery,
-    enrichLeadEmails, enrichmentRunning, enrichmentResult, setEnrichmentResult,
+    discoverLeadEmails, enrichmentRunning, enrichmentResult, setEnrichmentResult,
     runPipeline, pipelineRunning, pipelineResult, setPipelineResult
   } = useGrowthSystem();
 
@@ -489,7 +489,7 @@ export const GrowthSystem = () => {
                 </span>
               </h2>
 
-              {/* Enrich emails button */}
+              {/* AI Email Discovery button */}
               {leads.length > 0 && (
                 <button
                   onClick={() => {
@@ -498,20 +498,20 @@ export const GrowthSystem = () => {
                       setEnrichmentResult({ found: 0, not_found: 0, total: 0, already_had_email: leads.length, allHaveEmail: true });
                       return;
                     }
-                    enrichLeadEmails(withoutEmail);
+                    discoverLeadEmails(withoutEmail);
                   }}
                   disabled={enrichmentRunning}
-                  className="flex items-center gap-2 px-3 py-2 text-xs font-semibold text-violet-700 bg-violet-50 hover:bg-violet-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-wait"
+                  className="flex items-center gap-2 px-3 py-2 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-wait"
                 >
                   {enrichmentRunning ? (
                     <>
                       <RefreshCw size={13} className="animate-spin" />
-                      Buscando emails...
+                      AI buscando emails...
                     </>
                   ) : (
                     <>
-                      <AtSign size={13} />
-                      Buscar emails ({leads.filter(l => !l.email).length} sin email)
+                      <Globe size={13} />
+                      Buscar emails con IA ({leads.filter(l => !l.email).length} sin email)
                     </>
                   )}
                 </button>

@@ -357,14 +357,14 @@ export const useGrowthSystem = () => {
   }, []);
 
   // ========================================
-  // EMAIL ENRICHMENT (Apollo.io)
+  // EMAIL DISCOVERY (Anthropic AI + web_search)
   // ========================================
-  const enrichLeadEmails = useCallback(async (leadIds) => {
+  const discoverLeadEmails = useCallback(async (leadIds) => {
     setEnrichmentRunning(true);
     setEnrichmentResult(null);
     setError(null);
 
-    const BATCH_SIZE = 25;
+    const BATCH_SIZE = 5; // AI discovery is slower — 5 leads per API call
     const aggregated = {
       total: leadIds.length,
       found: 0,
@@ -376,22 +376,27 @@ export const useGrowthSystem = () => {
     };
 
     try {
-      // Process in batches of 25 (API limit)
       for (let i = 0; i < leadIds.length; i += BATCH_SIZE) {
         const batch = leadIds.slice(i, i + BATCH_SIZE);
 
         // Show progress during multi-batch processing
+        const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+        const totalBatches = Math.ceil(leadIds.length / BATCH_SIZE);
         if (leadIds.length > BATCH_SIZE) {
-          const batchNum = Math.floor(i / BATCH_SIZE) + 1;
-          const totalBatches = Math.ceil(leadIds.length / BATCH_SIZE);
           setEnrichmentResult({
             ...aggregated,
             processing: true,
-            batchProgress: `Procesando lote ${batchNum} de ${totalBatches}...`,
+            batchProgress: `AI Discovery: lote ${batchNum} de ${totalBatches}...`,
+          });
+        } else {
+          setEnrichmentResult({
+            ...aggregated,
+            processing: true,
+            batchProgress: 'AI buscando emails en la web...',
           });
         }
 
-        const response = await fetch('/api/email-enrichment', {
+        const response = await fetch('/api/email-discovery-ai', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ lead_ids: batch }),
@@ -400,7 +405,7 @@ export const useGrowthSystem = () => {
         const data = await response.json();
 
         if (!response.ok) {
-          throw new Error(data.error || 'Error en la búsqueda de emails');
+          throw new Error(data.error || 'Error en AI email discovery');
         }
 
         const results = data.results;
@@ -439,7 +444,7 @@ export const useGrowthSystem = () => {
       setEnrichmentResult(aggregated);
       return aggregated;
     } catch (err) {
-      console.error('Error enriching emails:', err);
+      console.error('Error in AI email discovery:', err);
       setError(err.message);
       setEnrichmentResult({ error: err.message });
       return null;
@@ -497,7 +502,7 @@ export const useGrowthSystem = () => {
     addCustomQuery,
     updateCustomQuery,
     deleteCustomQuery,
-    enrichLeadEmails,
+    discoverLeadEmails,
     enrichmentRunning,
     enrichmentResult,
     setEnrichmentResult,
