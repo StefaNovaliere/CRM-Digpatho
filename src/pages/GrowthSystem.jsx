@@ -23,6 +23,7 @@ import {
   CalendarDays,
   Filter,
   ChevronDown,
+  ChevronUp,
   AlertCircle,
   Target,
   Play,
@@ -702,23 +703,24 @@ export const GrowthSystem = () => {
                             </a>
                           )}
                         </div>
-                        {/* Description — collapsed by default, expandable */}
+                        {/* Description — hidden by default, toggle with chevron */}
                         {lead.extra_data?.description && (() => {
                           const clean = stripCiteTags(lead.extra_data.description);
-                          const isLong = clean.length > 150;
                           const isExpanded = expandedDescriptions.has(lead.id);
                           return (
                             <div className="mt-1.5">
-                              <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-wrap break-words">
-                                {isLong && !isExpanded ? clean.slice(0, 150).trimEnd() + '…' : clean}
-                              </p>
-                              {isLong && (
-                                <button
-                                  onClick={(e) => toggleDescription(lead.id, e)}
-                                  className="mt-0.5 text-xs text-blue-600 hover:text-blue-700 hover:underline"
-                                >
-                                  {isExpanded ? 'Ver menos' : 'Ver más'}
-                                </button>
+                              <button
+                                onClick={(e) => toggleDescription(lead.id, e)}
+                                className="flex items-center gap-1 text-xs text-gray-500 hover:text-blue-600 transition-colors"
+                                title={isExpanded ? 'Ocultar descripción' : 'Ver descripción'}
+                              >
+                                {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                                <span>{isExpanded ? 'Ocultar descripción' : 'Ver descripción'}</span>
+                              </button>
+                              {isExpanded && (
+                                <p className="mt-1 text-sm text-gray-600 leading-relaxed whitespace-pre-wrap break-words">
+                                  {clean}
+                                </p>
                               )}
                             </div>
                           );
