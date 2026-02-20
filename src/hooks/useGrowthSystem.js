@@ -261,6 +261,78 @@ export const useGrowthSystem = () => {
   }, []);
 
   // ========================================
+  // CUSTOM SEARCH QUERIES
+  // ========================================
+  const loadCustomQueries = useCallback(async (vertical) => {
+    try {
+      let query = supabase
+        .from('growth_search_queries')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (vertical) {
+        query = query.eq('vertical', vertical);
+      }
+
+      const { data, error: fetchError } = await query;
+      if (fetchError) throw fetchError;
+      return data || [];
+    } catch (err) {
+      console.error('Error loading custom queries:', err);
+      return [];
+    }
+  }, []);
+
+  const addCustomQuery = useCallback(async (vertical, queryText) => {
+    try {
+      const { data, error: insertError } = await supabase
+        .from('growth_search_queries')
+        .insert({ vertical, query: queryText, enabled: true })
+        .select()
+        .single();
+
+      if (insertError) throw insertError;
+      return data;
+    } catch (err) {
+      console.error('Error adding custom query:', err);
+      setError(err.message);
+      return null;
+    }
+  }, []);
+
+  const updateCustomQuery = useCallback(async (queryId, updates) => {
+    try {
+      const { error: updateErr } = await supabase
+        .from('growth_search_queries')
+        .update(updates)
+        .eq('id', queryId);
+
+      if (updateErr) throw updateErr;
+      return true;
+    } catch (err) {
+      console.error('Error updating custom query:', err);
+      setError(err.message);
+      return false;
+    }
+  }, []);
+
+  const deleteCustomQuery = useCallback(async (queryId) => {
+    try {
+      const { error: deleteErr } = await supabase
+        .from('growth_search_queries')
+        .delete()
+        .eq('id', queryId);
+
+      if (deleteErr) throw deleteErr;
+      return true;
+    } catch (err) {
+      console.error('Error deleting custom query:', err);
+      setError(err.message);
+      return false;
+    }
+  }, []);
+
+  // ========================================
   // PIPELINE EXECUTION
   // ========================================
   const runPipeline = useCallback(async (vertical, mode = 'full') => {
@@ -305,6 +377,10 @@ export const useGrowthSystem = () => {
     updateLead,
     promoteLeadToContact,
     ignoreLead,
+    loadCustomQueries,
+    addCustomQuery,
+    updateCustomQuery,
+    deleteCustomQuery,
     runPipeline,
     pipelineRunning,
     pipelineResult,

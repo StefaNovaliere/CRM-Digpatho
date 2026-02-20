@@ -31,11 +31,13 @@ import {
   X,
   Briefcase,
   Globe,
-  AtSign
+  AtSign,
+  Settings
 } from 'lucide-react';
 import { useGrowthSystem } from '../hooks/useGrowthSystem';
 import { DraftReviewModal } from '../components/growth/DraftReviewModal';
 import { LeadDetailModal } from '../components/growth/LeadDetailModal';
+import { QueryManagerModal } from '../components/growth/QueryManagerModal';
 import { GROWTH_VERTICALS, GROWTH_LEAD_STATUSES, GROWTH_DRAFT_STATUSES } from '../config/constants';
 
 // ========================================
@@ -124,6 +126,7 @@ export const GrowthSystem = () => {
     leads, drafts, stats, loading, error,
     loadLeads, loadDrafts, loadStats,
     updateDraftStatus, updateLead, promoteLeadToContact, ignoreLead,
+    loadCustomQueries, addCustomQuery, updateCustomQuery, deleteCustomQuery,
     runPipeline, pipelineRunning, pipelineResult, setPipelineResult
   } = useGrowthSystem();
 
@@ -134,6 +137,7 @@ export const GrowthSystem = () => {
   const [selectedLead, setSelectedLead] = useState(null);
   const [promoting, setPromoting] = useState(null); // leadId being promoted
   const [showModeMenu, setShowModeMenu] = useState(null); // vertical key or null
+  const [queryManagerVertical, setQueryManagerVertical] = useState(null); // vertical key or null
 
   // Pipeline execution
   const handleRunPipeline = async (vertical, mode) => {
@@ -324,15 +328,26 @@ export const GrowthSystem = () => {
                 <p className="text-xs text-gray-500">{vStats.leads} leads | {vStats.new} nuevos</p>
               </button>
 
-              {/* Run Pipeline Button */}
-              <div className="mt-3 relative">
+              {/* Pipeline + Queries buttons */}
+              <div className="mt-3 flex gap-1.5 relative">
+                {/* Manage queries */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setQueryManagerVertical(key);
+                  }}
+                  className="flex items-center justify-center p-2 text-xs rounded-lg border border-gray-200 text-gray-500 hover:text-gray-700 hover:bg-gray-50 transition-colors"
+                  title="Gestionar queries de búsqueda"
+                >
+                  <Settings size={13} />
+                </button>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     setShowModeMenu(isMenuOpen ? null : key);
                   }}
                   disabled={isRunning}
-                  className={`w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-semibold rounded-lg transition-all ${
+                  className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 text-xs font-semibold rounded-lg transition-all ${
                     isRunning
                       ? 'bg-gray-100 text-gray-400 cursor-wait'
                       : `${colors.accent} text-white hover:opacity-90 shadow-sm`
@@ -652,6 +667,16 @@ export const GrowthSystem = () => {
                         </div>
 
                         <div className="flex items-center gap-2 ml-4">
+                          {/* View lead */}
+                          {draft.lead && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setSelectedLead(draft.lead); }}
+                              className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                              title="Ver lead"
+                            >
+                              <UserPlus size={16} />
+                            </button>
+                          )}
                           <button
                             onClick={(e) => { e.stopPropagation(); setSelectedDraft(draft); }}
                             className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
@@ -709,6 +734,22 @@ export const GrowthSystem = () => {
           onClose={() => setSelectedDraft(null)}
           onApprove={handleApproveDraft}
           onReject={handleRejectDraft}
+          onViewLead={(lead) => {
+            setSelectedDraft(null);
+            setSelectedLead(lead);
+          }}
+        />
+      )}
+
+      {/* Query Manager Modal */}
+      {queryManagerVertical && (
+        <QueryManagerModal
+          vertical={queryManagerVertical}
+          onClose={() => setQueryManagerVertical(null)}
+          loadCustomQueries={loadCustomQueries}
+          addCustomQuery={addCustomQuery}
+          updateCustomQuery={updateCustomQuery}
+          deleteCustomQuery={deleteCustomQuery}
         />
       )}
     </div>

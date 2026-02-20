@@ -34,7 +34,7 @@ const verticalColors = {
   EVENTS: 'from-emerald-500 to-teal-500',
 };
 
-export const DraftReviewModal = ({ draft, onClose, onApprove, onReject }) => {
+export const DraftReviewModal = ({ draft, onClose, onApprove, onReject, onViewLead }) => {
   const { user } = useAuth();
   const [notes, setNotes] = useState(draft?.reviewer_notes || '');
   const [copied, setCopied] = useState(false);
@@ -305,18 +305,29 @@ export const DraftReviewModal = ({ draft, onClose, onApprove, onReject }) => {
                   </div>
                 )}
 
-                {/* LinkedIn */}
-                {lead.linkedin_url && (
-                  <a
-                    href={lead.linkedin_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 hover:underline"
-                  >
-                    <ExternalLink className="w-4 h-4" />
-                    Ver perfil en LinkedIn
-                  </a>
-                )}
+                {/* LinkedIn + View Lead */}
+                <div className="flex items-center gap-4">
+                  {lead.linkedin_url && (
+                    <a
+                      href={lead.linkedin_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 hover:underline"
+                    >
+                      <ExternalLink className="w-4 h-4" />
+                      Ver perfil en LinkedIn
+                    </a>
+                  )}
+                  {onViewLead && lead.id && (
+                    <button
+                      onClick={() => onViewLead(lead)}
+                      className="inline-flex items-center gap-2 text-sm text-violet-600 hover:text-violet-700 hover:underline"
+                    >
+                      <Briefcase className="w-4 h-4" />
+                      Editar lead
+                    </button>
+                  )}
+                </div>
 
                 {/* Subject */}
                 <div>
