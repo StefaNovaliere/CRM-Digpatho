@@ -51,6 +51,7 @@ async function callAnthropic(apiKey, { systemPrompt, userMessage, model, maxToke
 
       if (response.status === 429) return { error: 'rate_limit', apiError: errText.slice(0, 300) };
       if (response.status === 529) return { error: 'api_overloaded', apiError: errText.slice(0, 300) };
+      if (errText.includes('credit balance')) return { error: 'no_credits', apiError: errText.slice(0, 300) };
       return { error: `Anthropic API ${response.status}: ${errText.slice(0, 300)}` };
     } catch (err) {
       if (attempt < RETRY_DELAYS.length) {
@@ -95,6 +96,13 @@ export default async function handler(req, res) {
     });
 
     if (result.error) {
+      if (result.error === 'no_credits') {
+        return res.status(402).json({
+          error: 'no_credits',
+          message: 'Tu cuenta de Anthropic no tiene créditos suficientes. Cargá créditos en https://console.anthropic.com/settings/billing',
+          apiError: result.apiError || null,
+        });
+      }
       if (result.error === 'rate_limit' || result.error === 'api_overloaded') {
         return res.status(429).json({
           error: result.error,

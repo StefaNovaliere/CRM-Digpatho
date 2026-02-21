@@ -11,7 +11,9 @@ import {
   Mail,
   Users,
   Eye,
-  AlertTriangle
+  AlertTriangle,
+  Paperclip,
+  Trash2
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../hooks/useAuth';
@@ -61,6 +63,7 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
   const [warning, setWarning] = useState(null);
   const [previewEmail, setPreviewEmail] = useState(null);
   const [ccEmails, setCcEmails] = useState(''); // Campo CC global para toda la campaña
+  const [attachmentFile, setAttachmentFile] = useState(null); // Archivo adjunto para toda la campaña
 
   // Detectar si una fila parece ser de headers (tiene texto, no datos)
   const isHeaderRow = (row) => {
@@ -319,15 +322,58 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
     setError(null);
 
     try {
+      // 0. Subir adjunto a Supabase Storage si existe
+      let attachmentData = null;
+      if (attachmentFile) {
+        const fileExt = attachmentFile.name.split('.').pop();
+        const filePath = `campaign-attachments/${user.id}/${Date.now()}_${attachmentFile.name}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from('attachments')
+          .upload(filePath, attachmentFile, {
+            cacheControl: '3600',
+            upsert: false
+          });
+
+        if (uploadError) {
+          // Si el bucket no existe, intentar sin bucket prefix
+          console.error('Upload error:', uploadError);
+          throw new Error(`Error al subir adjunto: ${uploadError.message}. Verificá que el bucket "attachments" exista en Supabase Storage.`);
+        }
+
+        // Obtener URL pública o signed URL
+        const { data: urlData } = supabase.storage
+          .from('attachments')
+          .getPublicUrl(filePath);
+
+        attachmentData = {
+          name: attachmentFile.name,
+          path: filePath,
+          content_type: attachmentFile.type || 'application/octet-stream',
+          size: attachmentFile.size,
+          url: urlData?.publicUrl || null
+        };
+      }
+
       // 1. Crear campaña
+      const campaignInsert = {
+        name: campaignName.trim(),
+        status: 'ready',
+        total_emails: fileData.length,
+        created_by: user.id
+      };
+
+      // Agregar datos del adjunto si existe
+      if (attachmentData) {
+        campaignInsert.attachment_name = attachmentData.name;
+        campaignInsert.attachment_path = attachmentData.path;
+        campaignInsert.attachment_content_type = attachmentData.content_type;
+        campaignInsert.attachment_size = attachmentData.size;
+      }
+
       const { data: campaign, error: campError } = await supabase
         .from('bulk_email_campaigns')
-        .insert({
-          name: campaignName.trim(),
-          status: 'ready',
-          total_emails: fileData.length,
-          created_by: user.id
-        })
+        .insert(campaignInsert)
         .select()
         .single();
 
@@ -553,6 +599,62 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
                   </p>
                 </div>
 
+                {/* Archivo adjunto */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <Paperclip className="w-4 h-4 inline mr-1" />
+                    Archivo adjunto (se envía a todos los emails)
+                  </label>
+                  {!attachmentFile ? (
+                    <label className="block cursor-pointer">
+                      <div className="border-2 border-dashed border-gray-300 rounded-xl p-4 hover:border-primary-400 hover:bg-primary-50/50 transition-all text-center">
+                        <Upload className="w-6 h-6 text-gray-400 mx-auto mb-1" />
+                        <p className="text-sm text-gray-600">
+                          Click para seleccionar archivo
+                        </p>
+                        <p className="text-xs text-gray-400 mt-1">
+                          PDF, Word, Excel, imágenes, etc. (máx. 10 MB)
+                        </p>
+                      </div>
+                      <input
+                        type="file"
+                        onChange={(e) => {
+                          const f = e.target.files[0];
+                          if (!f) return;
+                          if (f.size > 10 * 1024 * 1024) {
+                            setError('El archivo adjunto no puede superar los 10 MB');
+                            return;
+                          }
+                          setAttachmentFile(f);
+                        }}
+                        className="hidden"
+                      />
+                    </label>
+                  ) : (
+                    <div className="flex items-center justify-between p-3 bg-primary-50 border border-primary-200 rounded-xl">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <Paperclip className="w-5 h-5 text-primary-500 flex-shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-gray-900 truncate">{attachmentFile.name}</p>
+                          <p className="text-xs text-gray-500">
+                            {(attachmentFile.size / 1024).toFixed(1)} KB
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setAttachmentFile(null)}
+                        className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg flex-shrink-0"
+                        title="Quitar adjunto"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
+                  <p className="text-xs text-gray-500 mt-1">
+                    Opcional. Este archivo se adjuntará a cada email de la campaña.
+                  </p>
+                </div>
+
                 {/* File Info */}
                 <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl">
                   <p className="text-sm text-blue-700">
@@ -698,9 +800,18 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
                   </div>
                 </div>
 
+                {attachmentFile && (
+                  <div className="p-4 bg-primary-50 border border-primary-200 rounded-xl flex items-center gap-3">
+                    <Paperclip className="w-5 h-5 text-primary-500 flex-shrink-0" />
+                    <p className="text-sm text-primary-700">
+                      <strong>Adjunto:</strong> {attachmentFile.name} ({(attachmentFile.size / 1024).toFixed(1)} KB) — se enviará con cada email
+                    </p>
+                  </div>
+                )}
+
                 <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl">
                   <p className="text-sm text-amber-800">
-                    <strong>Nota:</strong> Los contactos que no existan se crearán automáticamente. 
+                    <strong>Nota:</strong> Los contactos que no existan se crearán automáticamente.
                     Emails duplicados o sin datos requeridos serán ignorados.
                   </p>
                 </div>
