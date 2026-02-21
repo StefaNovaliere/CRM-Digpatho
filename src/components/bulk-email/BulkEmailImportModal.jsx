@@ -464,24 +464,29 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
 
         // Si no existe y tenemos nombre, crear contacto
         if (!contactId && (t.first_name || t.last_name)) {
-          const { data: newContact, error: contactError } = await supabase
-            .from('contacts')
-            .insert({
+          try {
+            const contactInsert = {
               first_name: t.first_name || 'Sin',
               last_name: t.last_name || 'Nombre',
               email: t.email,
-              phone: t.phone || null,
-              job_title: t.job_title || null,
-              country: t.country || null,
-              ai_context: t.ai_context || null,
-              interest_level: 'cold',
-              source: `Importación masiva: ${campaignName}`
-            })
-            .select()
-            .single();
+            };
+            // Campos opcionales del contacto
+            if (t.phone) contactInsert.phone = t.phone;
+            if (t.job_title) contactInsert.job_title = t.job_title;
+            if (t.country) contactInsert.country = t.country;
+            if (t.ai_context) contactInsert.ai_context = t.ai_context;
 
-          if (!contactError && newContact) {
-            contactId = newContact.id;
+            const { data: newContact, error: contactError } = await supabase
+              .from('contacts')
+              .insert(contactInsert)
+              .select('id')
+              .single();
+
+            if (!contactError && newContact) {
+              contactId = newContact.id;
+            }
+          } catch (contactErr) {
+            console.warn('No se pudo crear contacto para', t.email, contactErr.message);
           }
         }
 
@@ -504,13 +509,35 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
         });
       }
 
-      // 3. Insertar cola de emails
+      // 3. Insertar cola de emails con manejo de columnas opcionales
       if (queueItems.length > 0) {
-        const { error: queueError } = await supabase
-          .from('bulk_email_queue')
-          .insert(queueItems);
+        const queueOptionalFields = ['contact_id', 'to_name', 'cc_emails'];
+        let queuePayload = queueItems;
 
-        if (queueError) throw queueError;
+        for (let attempt = 0; attempt <= queueOptionalFields.length; attempt++) {
+          const { error: queueError } = await supabase
+            .from('bulk_email_queue')
+            .insert(queuePayload);
+
+          if (!queueError) break;
+
+          // Buscar qué columna no existe
+          const missingCol = queueOptionalFields.find(
+            col => queuePayload[0]?.[col] !== undefined && queueError.message?.includes(col)
+          );
+
+          if (missingCol) {
+            console.warn(`Columna "${missingCol}" no existe en bulk_email_queue, reintentando sin ella.`);
+            queuePayload = queuePayload.map(item => {
+              const { [missingCol]: _removed, ...rest } = item;
+              return rest;
+            });
+            continue;
+          }
+
+          // Si el error no es de columna inexistente, fallar
+          throw queueError;
+        }
       }
 
       // 4. Actualizar total real
