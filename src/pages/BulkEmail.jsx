@@ -60,21 +60,36 @@ export const BulkEmail = () => {
   // Cargar campañas (con datos del remitente)
   const loadCampaigns = async () => {
     setLoading(true);
-    const { data, error } = await supabase
+
+    // Cargar campañas
+    const { data, error: campError } = await supabase
       .from('bulk_email_campaigns')
-      .select('*, sender:user_profiles!bulk_email_campaigns_sender_id_fkey(id, full_name, email)')
+      .select('*')
       .order('created_at', { ascending: false });
 
-    if (!error) {
-      setCampaigns(data || []);
-    } else {
-      // Fallback sin join si la FK no existe aún
-      const { data: fallbackData } = await supabase
-        .from('bulk_email_campaigns')
-        .select('*')
-        .order('created_at', { ascending: false });
-      setCampaigns(fallbackData || []);
+    if (campError || !data) {
+      setCampaigns([]);
+      setLoading(false);
+      return;
     }
+
+    // Enriquecer con datos del remitente si sender_id existe
+    const senderIds = [...new Set(data.filter(c => c.sender_id).map(c => c.sender_id))];
+    let senderMap = {};
+    if (senderIds.length > 0) {
+      const { data: senders } = await supabase
+        .from('user_profiles')
+        .select('id, full_name, email')
+        .in('id', senderIds);
+      if (senders) {
+        senderMap = Object.fromEntries(senders.map(s => [s.id, s]));
+      }
+    }
+
+    setCampaigns(data.map(c => ({
+      ...c,
+      sender: c.sender_id ? senderMap[c.sender_id] || null : null
+    })));
     setLoading(false);
   };
 

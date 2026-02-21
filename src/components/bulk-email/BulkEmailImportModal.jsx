@@ -348,34 +348,29 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
       // 0. Subir adjunto a Supabase Storage si existe
       let attachmentData = null;
       if (attachmentFile) {
-        const fileExt = attachmentFile.name.split('.').pop();
         const filePath = `campaign-attachments/${user.id}/${Date.now()}_${attachmentFile.name}`;
 
-        const { error: uploadError } = await supabase.storage
-          .from('attachments')
-          .upload(filePath, attachmentFile, {
-            cacheControl: '3600',
-            upsert: false
-          });
+        try {
+          const { error: uploadError } = await supabase.storage
+            .from('attachments')
+            .upload(filePath, attachmentFile, {
+              cacheControl: '3600',
+              upsert: false
+            });
 
-        if (uploadError) {
-          // Si el bucket no existe, intentar sin bucket prefix
-          console.error('Upload error:', uploadError);
-          throw new Error(`Error al subir adjunto: ${uploadError.message}. Verificá que el bucket "attachments" exista en Supabase Storage.`);
+          if (uploadError) throw uploadError;
+
+          attachmentData = {
+            name: attachmentFile.name,
+            path: filePath,
+            content_type: attachmentFile.type || 'application/octet-stream',
+            size: attachmentFile.size,
+          };
+        } catch (uploadErr) {
+          console.warn('No se pudo subir adjunto (¿bucket "attachments" no existe?):', uploadErr.message);
+          setWarning(`No se pudo subir el adjunto: ${uploadErr.message}. La campaña se creará sin adjunto.`);
+          // Continuar sin adjunto
         }
-
-        // Obtener URL pública o signed URL
-        const { data: urlData } = supabase.storage
-          .from('attachments')
-          .getPublicUrl(filePath);
-
-        attachmentData = {
-          name: attachmentFile.name,
-          path: filePath,
-          content_type: attachmentFile.type || 'application/octet-stream',
-          size: attachmentFile.size,
-          url: urlData?.publicUrl || null
-        };
       }
 
       // 1. Crear campaña
@@ -395,13 +390,41 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
         campaignInsert.attachment_size = attachmentData.size;
       }
 
-      const { data: campaign, error: campError } = await supabase
-        .from('bulk_email_campaigns')
-        .insert(campaignInsert)
-        .select()
-        .single();
+      // Campos opcionales que pueden no existir en la tabla aún
+      const optionalFields = ['sender_id', 'attachment_name', 'attachment_path', 'attachment_content_type', 'attachment_size'];
 
-      if (campError) throw campError;
+      let campaign;
+      let insertPayload = { ...campaignInsert };
+
+      // Intentar insertar, si falla por columna inexistente, quitar ese campo y reintentar
+      for (let attempt = 0; attempt <= optionalFields.length; attempt++) {
+        const { data: campData, error: campError } = await supabase
+          .from('bulk_email_campaigns')
+          .insert(insertPayload)
+          .select()
+          .single();
+
+        if (!campError) {
+          campaign = campData;
+          break;
+        }
+
+        // Buscar qué columna no existe en el mensaje de error
+        const missingCol = optionalFields.find(
+          col => insertPayload[col] !== undefined && campError.message?.includes(col)
+        );
+
+        if (missingCol) {
+          console.warn(`Columna "${missingCol}" no existe en bulk_email_campaigns, reintentando sin ella.`);
+          delete insertPayload[missingCol];
+          continue;
+        }
+
+        // Si el error no es de columna inexistente, fallar
+        throw campError;
+      }
+
+      if (!campaign) throw new Error('No se pudo crear la campaña después de múltiples intentos.');
 
       // 2. Procesar cada fila
       const queueItems = [];
