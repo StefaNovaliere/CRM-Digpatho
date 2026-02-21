@@ -345,54 +345,34 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
     setError(null);
 
     try {
-      // 0. Subir adjunto a Supabase Storage si existe
+      // 0. Convertir adjunto a base64 si existe (sin depender de Supabase Storage)
       let attachmentData = null;
       if (attachmentFile) {
-        const filePath = `campaign-attachments/${user.id}/${Date.now()}_${attachmentFile.name}`;
-
         try {
-          // Intentar subir
-          let { error: uploadError } = await supabase.storage
-            .from('attachments')
-            .upload(filePath, attachmentFile, {
-              cacheControl: '3600',
-              upsert: false
-            });
-
-          // Si el bucket no existe, intentar crearlo y reintentar
-          if (uploadError && uploadError.message?.includes('Bucket not found')) {
-            console.log('Bucket "attachments" no existe, intentando crearlo...');
-            const { error: createBucketError } = await supabase.storage.createBucket('attachments', {
-              public: false,
-              fileSizeLimit: 10485760, // 10MB
-            });
-
-            if (!createBucketError) {
-              console.log('Bucket "attachments" creado exitosamente, reintentando subida...');
-              const retryResult = await supabase.storage
-                .from('attachments')
-                .upload(filePath, attachmentFile, {
-                  cacheControl: '3600',
-                  upsert: false
-                });
-              uploadError = retryResult.error;
-            } else {
-              console.warn('No se pudo crear el bucket:', createBucketError.message);
-            }
-          }
-
-          if (uploadError) throw uploadError;
+          const base64 = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              const arrayBuffer = reader.result;
+              const bytes = new Uint8Array(arrayBuffer);
+              let binary = '';
+              for (let i = 0; i < bytes.length; i++) {
+                binary += String.fromCharCode(bytes[i]);
+              }
+              resolve(btoa(binary));
+            };
+            reader.onerror = () => reject(new Error('Error al leer el archivo'));
+            reader.readAsArrayBuffer(attachmentFile);
+          });
 
           attachmentData = {
             name: attachmentFile.name,
-            path: filePath,
             content_type: attachmentFile.type || 'application/octet-stream',
             size: attachmentFile.size,
+            base64: base64,
           };
-        } catch (uploadErr) {
-          console.warn('No se pudo subir adjunto:', uploadErr.message);
-          setWarning(`No se pudo subir el adjunto: ${uploadErr.message}. La campaña se creará sin adjunto.`);
-          // Continuar sin adjunto
+        } catch (readErr) {
+          console.warn('No se pudo leer el adjunto:', readErr.message);
+          setWarning(`No se pudo leer el adjunto: ${readErr.message}. La campaña se creará sin adjunto.`);
         }
       }
 
@@ -408,13 +388,13 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
       // Agregar datos del adjunto si existe
       if (attachmentData) {
         campaignInsert.attachment_name = attachmentData.name;
-        campaignInsert.attachment_path = attachmentData.path;
         campaignInsert.attachment_content_type = attachmentData.content_type;
         campaignInsert.attachment_size = attachmentData.size;
+        campaignInsert.attachment_base64 = attachmentData.base64;
       }
 
       // Campos opcionales que pueden no existir en la tabla aún
-      const optionalFields = ['sender_id', 'attachment_name', 'attachment_path', 'attachment_content_type', 'attachment_size'];
+      const optionalFields = ['sender_id', 'attachment_name', 'attachment_content_type', 'attachment_size', 'attachment_base64'];
 
       let campaign;
       let insertPayload = { ...campaignInsert };
@@ -439,6 +419,11 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
 
         if (missingCol) {
           console.warn(`Columna "${missingCol}" no existe en bulk_email_campaigns, reintentando sin ella.`);
+          if (missingCol.startsWith('attachment_')) {
+            setWarning(prev => prev
+              ? prev + ' Además, el adjunto no se pudo guardar (columna faltante en la base de datos).'
+              : 'El adjunto no se pudo guardar porque falta la columna en la base de datos. Ejecutá el SQL de migración.');
+          }
           delete insertPayload[missingCol];
           continue;
         }
