@@ -22,14 +22,39 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
   const [currentEmail, setCurrentEmail] = useState(null);
   const [logs, setLogs] = useState([]);
   const [error, setError] = useState(null);
+  const [senderProfile, setSenderProfile] = useState(null); // Perfil del remitente elegido
 
   const isPausedRef = useRef(false);
   const abortRef = useRef(false);
 
-  // Cargar estado inicial
+  // Cargar estado inicial y perfil del remitente
   useEffect(() => {
     loadProgress();
+    loadSenderProfile();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [campaign.id]);
+
+  // Cargar el perfil del remitente seleccionado
+  const loadSenderProfile = async () => {
+    const senderId = campaign.sender_id;
+    if (!senderId || senderId === user?.id) {
+      // Usar el perfil del usuario actual
+      setSenderProfile(profile);
+      return;
+    }
+    const { data, error: fetchErr } = await supabase
+      .from('user_profiles')
+      .select('*')
+      .eq('id', senderId)
+      .single();
+
+    if (!fetchErr && data) {
+      setSenderProfile(data);
+    } else {
+      // Fallback al usuario actual
+      setSenderProfile(profile);
+    }
+  };
 
   const loadProgress = async () => {
     const { data: queue } = await supabase
@@ -52,15 +77,18 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
     setLogs(prev => [...prev, { message, type, timestamp }].slice(-50));
   };
 
-  // Obtener access token válido
+  // Obtener access token válido (del remitente seleccionado)
   const getValidAccessToken = async () => {
-    if (!profile?.google_access_token) {
-      throw new Error('No hay token de Gmail. Iniciá sesión nuevamente.');
+    const sender = senderProfile || profile;
+    const senderId = campaign.sender_id || user?.id;
+
+    if (!sender?.google_access_token) {
+      throw new Error(`No hay token de Gmail para el remitente. Pedile que inicie sesión nuevamente.`);
     }
 
     // Verificar si el token está por expirar
-    if (profile.google_token_expires_at) {
-      const expiresAt = new Date(profile.google_token_expires_at);
+    if (sender.google_token_expires_at) {
+      const expiresAt = new Date(sender.google_token_expires_at);
       if (expiresAt.getTime() - Date.now() < 5 * 60 * 1000) {
         // Refrescar token
         const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
@@ -72,12 +100,12 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
           body: new URLSearchParams({
             client_id: clientId,
             client_secret: clientSecret,
-            refresh_token: profile.google_refresh_token,
+            refresh_token: sender.google_refresh_token,
             grant_type: 'refresh_token',
           }),
         });
 
-        if (!response.ok) throw new Error('Error al refrescar token');
+        if (!response.ok) throw new Error('Error al refrescar token del remitente');
         const data = await response.json();
 
         // Actualizar en DB
@@ -87,20 +115,21 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
         await supabase.from('user_profiles').update({
           google_access_token: data.access_token,
           google_token_expires_at: newExpiresAt.toISOString(),
-        }).eq('id', user.id);
+        }).eq('id', senderId);
 
         return data.access_token;
       }
     }
 
-    return profile.google_access_token;
+    return sender.google_access_token;
   };
 
   // Enviar un email (con o sin adjunto)
   const sendSingleEmail = async (queueItem, accessToken, attachmentData) => {
-    const fromEmail = user?.email || profile?.email;
-    const fromName = profile?.full_name || 'Digpatho';
-    const signature = profile?.email_signature ? `\n\n--\n${profile.email_signature}` : '';
+    const sender = senderProfile || profile;
+    const fromEmail = sender?.email || user?.email || profile?.email;
+    const fromName = sender?.full_name || 'Digpatho';
+    const signature = sender?.email_signature ? `\n\n--\n${sender.email_signature}` : '';
     const fullBody = queueItem.body + signature;
 
     // Construir MIME
@@ -441,6 +470,11 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
             <div className="text-white">
               <h2 className="text-lg font-semibold">Envío Masivo</h2>
               <p className="text-sm text-primary-100">{campaign.name}</p>
+              {senderProfile && (
+                <p className="text-xs text-primary-200 mt-0.5">
+                  Enviando como: {senderProfile.full_name || senderProfile.email}
+                </p>
+              )}
             </div>
             {status !== 'sending' && (
               <button

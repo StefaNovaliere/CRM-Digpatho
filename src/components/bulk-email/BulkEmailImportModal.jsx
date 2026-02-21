@@ -1,5 +1,5 @@
 // src/components/bulk-email/BulkEmailImportModal.jsx
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import {
   X,
   Upload,
@@ -13,7 +13,8 @@ import {
   Eye,
   AlertTriangle,
   Paperclip,
-  Trash2
+  Trash2,
+  Send
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../hooks/useAuth';
@@ -64,6 +65,28 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
   const [previewEmail, setPreviewEmail] = useState(null);
   const [ccEmails, setCcEmails] = useState(''); // Campo CC global para toda la campaña
   const [attachmentFile, setAttachmentFile] = useState(null); // Archivo adjunto para toda la campaña
+  const [senderUsers, setSenderUsers] = useState([]); // Usuarios con Gmail conectado
+  const [selectedSenderId, setSelectedSenderId] = useState(user?.id || ''); // Remitente seleccionado
+
+  // Cargar usuarios con Gmail conectado
+  useEffect(() => {
+    const loadSenders = async () => {
+      const { data, error: fetchErr } = await supabase
+        .from('user_profiles')
+        .select('id, full_name, email, google_access_token')
+        .not('google_access_token', 'is', null);
+
+      if (!fetchErr && data) {
+        setSenderUsers(data);
+        // Si el usuario actual no está en la lista, seleccionar el primero
+        if (!data.find(u => u.id === user?.id) && data.length > 0) {
+          setSelectedSenderId(data[0].id);
+        }
+      }
+    };
+    loadSenders();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Detectar si una fila parece ser de headers (tiene texto, no datos)
   const isHeaderRow = (row) => {
@@ -360,7 +383,8 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
         name: campaignName.trim(),
         status: 'ready',
         total_emails: fileData.length,
-        created_by: user.id
+        created_by: user.id,
+        sender_id: selectedSenderId || user.id
       };
 
       // Agregar datos del adjunto si existe
@@ -582,6 +606,34 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
                   />
                 </div>
 
+                {/* Sender Selector */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <Send className="w-4 h-4 inline mr-1" />
+                    Remitente (¿Quién envía?)
+                  </label>
+                  {senderUsers.length > 0 ? (
+                    <select
+                      value={selectedSenderId}
+                      onChange={(e) => setSelectedSenderId(e.target.value)}
+                      className="input"
+                    >
+                      {senderUsers.map(u => (
+                        <option key={u.id} value={u.id}>
+                          {u.full_name || 'Sin nombre'} — {u.email}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">
+                      No hay usuarios con Gmail conectado. Pedile a los usuarios que inicien sesión con Google.
+                    </div>
+                  )}
+                  <p className="text-xs text-gray-500 mt-1">
+                    Los emails se enviarán desde la cuenta de Gmail de este usuario.
+                  </p>
+                </div>
+
                 {/* CC Emails */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -760,6 +812,14 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
                   <p className="text-sm text-green-700">
                     <strong>Campaña:</strong> {campaignName} • <strong>{getValidEmailCount()}</strong> emails válidos de {fileData.length} filas
                   </p>
+                  {(() => {
+                    const sender = senderUsers.find(u => u.id === selectedSenderId);
+                    return sender ? (
+                      <p className="text-sm text-green-600 mt-1">
+                        <strong>Remitente:</strong> {sender.full_name || 'Sin nombre'} ({sender.email})
+                      </p>
+                    ) : null;
+                  })()}
                 </div>
 
                 <div>
