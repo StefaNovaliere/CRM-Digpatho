@@ -257,9 +257,19 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
       let accessToken = await getValidAccessToken();
       addLog('Token de Gmail obtenido', 'success');
 
-      // Descargar adjunto de la campaña (una sola vez)
+      // Cargar adjunto de la campaña (una sola vez)
       let attachmentData = null;
-      if (campaign.attachment_path && campaign.attachment_name) {
+      if (campaign.attachment_base64 && campaign.attachment_name) {
+        // Adjunto guardado como base64 directamente en la campaña
+        attachmentData = {
+          name: campaign.attachment_name,
+          contentType: campaign.attachment_content_type || 'application/octet-stream',
+          base64: campaign.attachment_base64
+        };
+        const sizeKB = campaign.attachment_size ? (campaign.attachment_size / 1024).toFixed(1) : '?';
+        addLog(`Adjunto cargado: ${campaign.attachment_name} (${sizeKB} KB)`, 'success');
+      } else if (campaign.attachment_path && campaign.attachment_name) {
+        // Fallback: descargar de Supabase Storage (si el bucket existe)
         addLog(`Descargando adjunto: ${campaign.attachment_name}...`, 'info');
         try {
           const { data: fileBlob, error: downloadError } = await supabase.storage
@@ -268,7 +278,6 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
 
           if (downloadError) throw downloadError;
 
-          // Convertir blob a base64
           const arrayBuffer = await fileBlob.arrayBuffer();
           const bytes = new Uint8Array(arrayBuffer);
           let binary = '';
