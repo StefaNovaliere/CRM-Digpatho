@@ -351,12 +351,35 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
         const filePath = `campaign-attachments/${user.id}/${Date.now()}_${attachmentFile.name}`;
 
         try {
-          const { error: uploadError } = await supabase.storage
+          // Intentar subir
+          let { error: uploadError } = await supabase.storage
             .from('attachments')
             .upload(filePath, attachmentFile, {
               cacheControl: '3600',
               upsert: false
             });
+
+          // Si el bucket no existe, intentar crearlo y reintentar
+          if (uploadError && uploadError.message?.includes('Bucket not found')) {
+            console.log('Bucket "attachments" no existe, intentando crearlo...');
+            const { error: createBucketError } = await supabase.storage.createBucket('attachments', {
+              public: false,
+              fileSizeLimit: 10485760, // 10MB
+            });
+
+            if (!createBucketError) {
+              console.log('Bucket "attachments" creado exitosamente, reintentando subida...');
+              const retryResult = await supabase.storage
+                .from('attachments')
+                .upload(filePath, attachmentFile, {
+                  cacheControl: '3600',
+                  upsert: false
+                });
+              uploadError = retryResult.error;
+            } else {
+              console.warn('No se pudo crear el bucket:', createBucketError.message);
+            }
+          }
 
           if (uploadError) throw uploadError;
 
@@ -367,7 +390,7 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
             size: attachmentFile.size,
           };
         } catch (uploadErr) {
-          console.warn('No se pudo subir adjunto (¿bucket "attachments" no existe?):', uploadErr.message);
+          console.warn('No se pudo subir adjunto:', uploadErr.message);
           setWarning(`No se pudo subir el adjunto: ${uploadErr.message}. La campaña se creará sin adjunto.`);
           // Continuar sin adjunto
         }
