@@ -16,7 +16,8 @@ import {
   Mail,
   Users,
   AlertCircle,
-  Paperclip
+  Paperclip,
+  User
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
@@ -56,16 +57,23 @@ export const BulkEmail = () => {
   const [showQueueModal, setShowQueueModal] = useState(false);
   const [sendingCampaign, setSendingCampaign] = useState(null);
 
-  // Cargar campañas
+  // Cargar campañas (con datos del remitente)
   const loadCampaigns = async () => {
     setLoading(true);
     const { data, error } = await supabase
       .from('bulk_email_campaigns')
-      .select('*')
+      .select('*, sender:user_profiles!bulk_email_campaigns_sender_id_fkey(id, full_name, email)')
       .order('created_at', { ascending: false });
 
     if (!error) {
       setCampaigns(data || []);
+    } else {
+      // Fallback sin join si la FK no existe aún
+      const { data: fallbackData } = await supabase
+        .from('bulk_email_campaigns')
+        .select('*')
+        .order('created_at', { ascending: false });
+      setCampaigns(fallbackData || []);
     }
     setLoading(false);
   };
@@ -242,6 +250,15 @@ export const BulkEmail = () => {
                         <>
                           <span>•</span>
                           <span className="text-red-600">{campaign.failed_count} fallidos</span>
+                        </>
+                      )}
+                      {campaign.sender && (
+                        <>
+                          <span>•</span>
+                          <span className="flex items-center gap-1 text-gray-600">
+                            <User size={13} />
+                            {campaign.sender.full_name || campaign.sender.email}
+                          </span>
                         </>
                       )}
                       {campaign.attachment_name && (
