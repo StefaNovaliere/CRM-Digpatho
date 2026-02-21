@@ -6,7 +6,8 @@ import {
   Pause,
   CheckCircle,
   Loader2,
-  AlertTriangle
+  AlertTriangle,
+  Paperclip
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../hooks/useAuth';
@@ -95,8 +96,8 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
     return profile.google_access_token;
   };
 
-  // Enviar un email
-  const sendSingleEmail = async (queueItem, accessToken) => {
+  // Enviar un email (con o sin adjunto)
+  const sendSingleEmail = async (queueItem, accessToken, attachmentData) => {
     const fromEmail = user?.email || profile?.email;
     const fromName = profile?.full_name || 'Digpatho';
     const signature = profile?.email_signature ? `\n\n--\n${profile.email_signature}` : '';
@@ -105,19 +106,8 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
     // Construir MIME
     const encodedSubject = `=?UTF-8?B?${btoa(unescape(encodeURIComponent(queueItem.subject)))}?=`;
 
-    // Headers base
-    const headers = [
-      `From: "${fromName}" <${fromEmail}>`,
-      `To: ${queueItem.to_email}`,
-      `Subject: ${encodedSubject}`,
-      'MIME-Version: 1.0',
-      'Content-Type: text/plain; charset=UTF-8'
-    ];
-
     // --- CORRECCIÓN CC ---
-    // Buscamos el CC en el ITEM de la cola (queueItem), no en la campaña
     let ccString = '';
-    
     if (queueItem.cc_emails) {
       if (Array.isArray(queueItem.cc_emails) && queueItem.cc_emails.length > 0) {
         ccString = queueItem.cc_emails.join(', ');
@@ -126,18 +116,72 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
       }
     }
 
-    // Si encontramos CC válido, lo insertamos en los headers (después del To, antes del Subject)
-    if (ccString) {
-      // headers[0] is From, headers[1] is To. Insert at index 2.
-      headers.splice(2, 0, `Cc: ${ccString}`);
-    }
-    // ---------------------
+    let emailContent;
 
-    const emailContent = [
-      ...headers,
-      '',
-      fullBody
-    ].join('\r\n');
+    if (attachmentData) {
+      // --- MIME multipart/mixed con adjunto ---
+      const boundary = `boundary_${Date.now()}_${Math.random().toString(36).substring(2)}`;
+
+      const headers = [
+        `From: "${fromName}" <${fromEmail}>`,
+        `To: ${queueItem.to_email}`,
+      ];
+      if (ccString) headers.push(`Cc: ${ccString}`);
+      headers.push(
+        `Subject: ${encodedSubject}`,
+        'MIME-Version: 1.0',
+        `Content-Type: multipart/mixed; boundary="${boundary}"`
+      );
+
+      // Helper: dividir base64 en líneas de 76 caracteres (estándar MIME)
+      const wrapBase64 = (b64) => b64.match(/.{1,76}/g)?.join('\r\n') || b64;
+
+      // Parte 1: cuerpo del email
+      const bodyPart = [
+        `--${boundary}`,
+        'Content-Type: text/plain; charset=UTF-8',
+        'Content-Transfer-Encoding: base64',
+        '',
+        wrapBase64(btoa(unescape(encodeURIComponent(fullBody))))
+      ].join('\r\n');
+
+      // Parte 2: archivo adjunto
+      const attachmentPart = [
+        `--${boundary}`,
+        `Content-Type: ${attachmentData.contentType}; name="${attachmentData.name}"`,
+        'Content-Transfer-Encoding: base64',
+        `Content-Disposition: attachment; filename="${attachmentData.name}"`,
+        '',
+        wrapBase64(attachmentData.base64)
+      ].join('\r\n');
+
+      emailContent = [
+        ...headers,
+        '',
+        bodyPart,
+        attachmentPart,
+        `--${boundary}--`
+      ].join('\r\n');
+
+    } else {
+      // --- MIME simple sin adjunto (original) ---
+      const headers = [
+        `From: "${fromName}" <${fromEmail}>`,
+        `To: ${queueItem.to_email}`,
+      ];
+      if (ccString) headers.push(`Cc: ${ccString}`);
+      headers.push(
+        `Subject: ${encodedSubject}`,
+        'MIME-Version: 1.0',
+        'Content-Type: text/plain; charset=UTF-8'
+      );
+
+      emailContent = [
+        ...headers,
+        '',
+        fullBody
+      ].join('\r\n');
+    }
 
     const encodedEmail = btoa(unescape(encodeURIComponent(emailContent)))
       .replace(/\+/g, '-')
@@ -183,6 +227,37 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
       // Obtener token
       let accessToken = await getValidAccessToken();
       addLog('Token de Gmail obtenido', 'success');
+
+      // Descargar adjunto de la campaña (una sola vez)
+      let attachmentData = null;
+      if (campaign.attachment_path && campaign.attachment_name) {
+        addLog(`Descargando adjunto: ${campaign.attachment_name}...`, 'info');
+        try {
+          const { data: fileBlob, error: downloadError } = await supabase.storage
+            .from('attachments')
+            .download(campaign.attachment_path);
+
+          if (downloadError) throw downloadError;
+
+          // Convertir blob a base64
+          const arrayBuffer = await fileBlob.arrayBuffer();
+          const bytes = new Uint8Array(arrayBuffer);
+          let binary = '';
+          for (let i = 0; i < bytes.length; i++) {
+            binary += String.fromCharCode(bytes[i]);
+          }
+          const base64 = btoa(binary);
+
+          attachmentData = {
+            name: campaign.attachment_name,
+            contentType: campaign.attachment_content_type || 'application/octet-stream',
+            base64: base64
+          };
+          addLog(`Adjunto cargado: ${campaign.attachment_name} (${(fileBlob.size / 1024).toFixed(1)} KB)`, 'success');
+        } catch (attachErr) {
+          addLog(`Error al descargar adjunto: ${attachErr.message}. Se enviará sin adjunto.`, 'warning');
+        }
+      }
 
       // Obtener emails pendientes
       const { data: pendingEmails, error: fetchError } = await supabase
@@ -232,8 +307,8 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
             addLog('Token refrescado', 'info');
           }
 
-          // Enviar
-          const result = await sendSingleEmail(queueItem, accessToken);
+          // Enviar (con adjunto si existe)
+          const result = await sendSingleEmail(queueItem, accessToken, attachmentData);
 
           // Marcar como enviado
           await supabase
@@ -379,6 +454,18 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
 
           {/* Progress */}
           <div className="p-6">
+            {/* Attachment Info */}
+            {campaign.attachment_name && (
+              <div className="mb-4 p-3 bg-primary-50 border border-primary-200 rounded-xl flex items-center gap-3">
+                <Paperclip className="w-5 h-5 text-primary-500 flex-shrink-0" />
+                <p className="text-sm text-primary-700">
+                  <strong>Adjunto:</strong> {campaign.attachment_name}
+                  {campaign.attachment_size && ` (${(campaign.attachment_size / 1024).toFixed(1)} KB)`}
+                  — se incluirá en cada email
+                </p>
+              </div>
+            )}
+
             {/* Progress Bar */}
             <div className="mb-6">
               <div className="flex items-center justify-between mb-2">

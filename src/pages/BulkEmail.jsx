@@ -15,7 +15,8 @@ import {
   RefreshCw,
   Mail,
   Users,
-  AlertCircle
+  AlertCircle,
+  Paperclip
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
@@ -77,6 +78,13 @@ export const BulkEmail = () => {
   const handleDeleteCampaign = async (campaign) => {
     if (!window.confirm(`¿Eliminar la campaña "${campaign.name}"? Esta acción no se puede deshacer.`)) {
       return;
+    }
+
+    // Eliminar adjunto de Storage si existe
+    if (campaign.attachment_path) {
+      await supabase.storage
+        .from('attachments')
+        .remove([campaign.attachment_path]);
     }
 
     const { error } = await supabase
@@ -234,6 +242,15 @@ export const BulkEmail = () => {
                         <>
                           <span>•</span>
                           <span className="text-red-600">{campaign.failed_count} fallidos</span>
+                        </>
+                      )}
+                      {campaign.attachment_name && (
+                        <>
+                          <span>•</span>
+                          <span className="flex items-center gap-1 text-primary-600">
+                            <Paperclip size={13} />
+                            {campaign.attachment_name}
+                          </span>
                         </>
                       )}
                       <span>•</span>
