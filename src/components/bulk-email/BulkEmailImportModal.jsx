@@ -395,13 +395,30 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
         campaignInsert.attachment_size = attachmentData.size;
       }
 
-      const { data: campaign, error: campError } = await supabase
+      let campaign;
+      const { data: campData, error: campError } = await supabase
         .from('bulk_email_campaigns')
         .insert(campaignInsert)
         .select()
         .single();
 
-      if (campError) throw campError;
+      if (campError) {
+        // Si falla por columna sender_id inexistente, reintentar sin ella
+        if (campError.message?.includes('sender_id') || campError.code === '42703') {
+          const { sender_id, ...insertWithoutSender } = campaignInsert;
+          const { data: campData2, error: campError2 } = await supabase
+            .from('bulk_email_campaigns')
+            .insert(insertWithoutSender)
+            .select()
+            .single();
+          if (campError2) throw campError2;
+          campaign = campData2;
+        } else {
+          throw campError;
+        }
+      } else {
+        campaign = campData;
+      }
 
       // 2. Procesar cada fila
       const queueItems = [];
