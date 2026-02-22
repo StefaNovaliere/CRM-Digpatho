@@ -79,7 +79,6 @@ export const DraftReviewModal = ({ draft, onClose, onApprove, onReject, onViewLe
     const { data, error } = await supabase
       .from('bulk_email_campaigns')
       .select('id, name, status, total_emails, sent_count')
-      .in('status', ['draft', 'ready', 'paused'])
       .order('created_at', { ascending: false });
 
     if (!error) {
@@ -565,11 +564,22 @@ export const DraftReviewModal = ({ draft, onClose, onApprove, onReject, onViewLe
                             className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none text-sm"
                           >
                             <option value="">— Elegir campaña —</option>
-                            {campaigns.map(c => (
-                              <option key={c.id} value={c.id}>
-                                {c.name} ({c.total_emails} emails, {c.sent_count} enviados)
-                              </option>
-                            ))}
+                            {campaigns.map(c => {
+                              const statusLabels = {
+                                draft: 'Borrador',
+                                ready: 'Listo',
+                                sending: 'Enviando',
+                                completed: 'Completado',
+                                paused: 'Pausado',
+                                failed: 'Error',
+                              };
+                              const statusLabel = statusLabels[c.status] || c.status;
+                              return (
+                                <option key={c.id} value={c.id}>
+                                  {c.name} — {statusLabel} ({c.total_emails} emails, {c.sent_count} enviados)
+                                </option>
+                              );
+                            })}
                             <option value="new">+ Crear nueva campaña</option>
                           </select>
                         </div>
