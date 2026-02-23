@@ -168,7 +168,7 @@ export const useGrowthSystem = () => {
   const updateDraftContent = useCallback(async (draftId, fields) => {
     try {
       const allowedFields = ['subject', 'body'];
-      const updates = { updated_at: new Date().toISOString() };
+      const updates = {};
       for (const key of allowedFields) {
         if (fields[key] !== undefined) {
           updates[key] = fields[key];
