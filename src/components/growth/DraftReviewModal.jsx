@@ -79,11 +79,11 @@ export const DraftReviewModal = ({ draft, onClose, onApprove, onReject, onViewLe
     setCampaignError(null);
 
     try {
-      // Usar select('*') para evitar errores por columnas inexistentes
+      // Traer todas las campañas sin filtrar por status, para que el usuario
+      // pueda agregar borradores a cualquier campaña existente
       const { data, error } = await supabase
         .from('bulk_email_campaigns')
         .select('*')
-        .in('status', ['draft', 'ready', 'paused'])
         .order('created_at', { ascending: false });
 
       if (error) {

@@ -48,6 +48,42 @@ if (!error) {
 
 ---
 
+## Error #2: Filtro de status excluia campanas completadas (2026-02-23)
+
+**Archivo afectado:** `src/components/growth/DraftReviewModal.jsx`
+
+**Descripcion del bug:** Aun despues de arreglar el `select()`, el dropdown de campanas
+seguia vacio. El usuario tenia campanas, pero todas con status `completed`.
+
+**Causa raiz:** La query filtraba solo campanas con status `draft`, `ready` o `paused`:
+```javascript
+// MAL - excluye 'completed', 'sending', 'failed'
+.in('status', ['draft', 'ready', 'paused'])
+```
+
+En la pagina de Envio Masivo (`BulkEmail.jsx`), la query NO tiene filtro de status
+y muestra todas las campanas. El DraftReviewModal deberia hacer lo mismo.
+
+**Fix aplicado:** Eliminar el filtro `.in('status', [...])` para traer todas las campanas,
+igual que hace `BulkEmail.jsx`.
+
+**Error de Claude en el diagnostico anterior:** En el Error #1, diagnostique que el
+problema era el `select()` con columnas inexistentes. Esto PUEDE haber sido un problema
+adicional, pero la causa visible del bug era el filtro de status. Deberia haber verificado
+los datos reales (viendo los screenshots o preguntando que status tenian las campanas)
+antes de concluir el diagnostico.
+
+**Leccion aprendida:**
+- ANTES de aplicar un fix, verificar que resuelve el problema real. No asumir la causa
+  sin evidencia directa.
+- Comparar siempre con el componente que SI funciona (en este caso `BulkEmail.jsx`)
+  y replicar exactamente su comportamiento.
+- Cuando se corrige un bug, verificar trazando el flujo completo paso a paso,
+  no solo la linea que se cambio.
+- Si hay screenshots disponibles, MIRARLOS primero para entender el estado real de los datos.
+
+---
+
 ## Patrones generales a evitar
 
 ### 1. Selects explicitos sin verificar el schema
@@ -77,6 +113,26 @@ if (error) {
 Solo porque `BulkEmail.jsx` accede a `campaign.sent_count` no significa que la columna exista.
 Con `select('*')`, acceder a una propiedad inexistente en JS da `undefined`, no un error.
 Pero con `select('col')`, pedir una columna inexistente a PostgREST SI da error.
+
+### 4. Filtros restrictivos que excluyen datos validos
+Cuando un componente debe listar datos que el usuario espera ver, comparar con el
+componente que SI funciona. Si `BulkEmail.jsx` muestra todas las campanas sin filtro,
+el dropdown de DraftReviewModal no deberia filtrar por status.
+```javascript
+// MAL: asume que solo importan ciertos estados
+.in('status', ['draft', 'ready', 'paused'])
+
+// BIEN: muestra todo como lo hace la pagina principal
+// (sin filtro de status)
+```
+
+### 5. Diagnosticar sin verificar - el "fix-and-pray"
+Antes de commitear un fix, SIEMPRE trazar el flujo completo:
+1. Que datos existen en la DB? (mirar screenshots, preguntar al usuario)
+2. Que query se ejecuta? (leer la query exacta)
+3. Que devuelve la query? (simular con los datos reales)
+4. Que muestra el UI con esos datos? (leer el render)
+5. Coincide con lo que el usuario espera? (comparar con la pagina que funciona)
 
 ---
 
