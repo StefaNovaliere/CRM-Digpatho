@@ -76,15 +76,29 @@ export const DraftReviewModal = ({ draft, onClose, onApprove, onReject, onViewLe
 
   const loadCampaigns = async () => {
     setLoadingCampaigns(true);
-    const { data, error } = await supabase
-      .from('bulk_email_campaigns')
-      .select('id, name, status, total_emails, sent_count')
-      .in('status', ['draft', 'ready', 'paused'])
-      .order('created_at', { ascending: false });
+    setCampaignError(null);
 
-    if (!error) {
-      setCampaigns(data || []);
+    try {
+      // Usar select('*') para evitar errores por columnas inexistentes
+      const { data, error } = await supabase
+        .from('bulk_email_campaigns')
+        .select('*')
+        .in('status', ['draft', 'ready', 'paused'])
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error cargando campañas:', error);
+        setCampaignError('No se pudieron cargar las campañas existentes.');
+        setCampaigns([]);
+      } else {
+        setCampaigns(data || []);
+      }
+    } catch (err) {
+      console.error('Error inesperado cargando campañas:', err);
+      setCampaignError('Error inesperado al cargar campañas.');
+      setCampaigns([]);
     }
+
     setLoadingCampaigns(false);
   };
 
@@ -567,7 +581,7 @@ export const DraftReviewModal = ({ draft, onClose, onApprove, onReject, onViewLe
                             <option value="">— Elegir campaña —</option>
                             {campaigns.map(c => (
                               <option key={c.id} value={c.id}>
-                                {c.name} ({c.total_emails} emails, {c.sent_count} enviados)
+                                {c.name} ({c.total_emails || 0} emails, {c.sent_count || 0} enviados)
                               </option>
                             ))}
                             <option value="new">+ Crear nueva campaña</option>
