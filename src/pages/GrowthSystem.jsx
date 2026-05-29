@@ -42,6 +42,7 @@ import { useGrowthSystem } from '../hooks/useGrowthSystem';
 import { DraftReviewModal } from '../components/growth/DraftReviewModal';
 import { LeadDetailModal } from '../components/growth/LeadDetailModal';
 import { QueryManagerModal } from '../components/growth/QueryManagerModal';
+import { ApolloEmailSearch } from '../components/growth/ApolloEmailSearch';
 import { GROWTH_VERTICALS, GROWTH_LEAD_STATUSES, GROWTH_DRAFT_STATUSES } from '../config/constants';
 
 // ========================================
@@ -120,6 +121,7 @@ const StatCard = ({ icon: Icon, iconColor, value, label }) => (
 const TABS = [
   { id: 'leads', label: 'Leads Descubiertos', icon: Users },
   { id: 'drafts', label: 'Borradores Pendientes', icon: Mail },
+  { id: 'apollo', label: 'Buscador Apollo', icon: Zap },
 ];
 
 // ========================================
@@ -564,6 +566,13 @@ export const GrowthSystem = () => {
 
       {/* Content */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+
+        {/* APOLLO TAB (Buscador masivo de emails via Apollo.io) */}
+        {activeTab === 'apollo' && (
+          <div className="p-6">
+            <ApolloEmailSearch />
+          </div>
+        )}
 
         {/* LEADS TAB */}
         {activeTab === 'leads' && (
