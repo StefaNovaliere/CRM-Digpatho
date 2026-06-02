@@ -168,7 +168,7 @@ export const useGrowthSystem = () => {
   const updateDraftContent = useCallback(async (draftId, fields) => {
     try {
       const allowedFields = ['subject', 'body'];
-      const updates = { updated_at: new Date().toISOString() };
+      const updates = {};
       for (const key of allowedFields) {
         if (fields[key] !== undefined) {
           updates[key] = fields[key];
@@ -390,14 +390,14 @@ export const useGrowthSystem = () => {
   }, []);
 
   // ========================================
-  // EMAIL DISCOVERY (Anthropic AI + web_search)
+  // EMAIL DISCOVERY (Vertex AI + Google Search grounding)
   // ========================================
   const discoverLeadEmails = useCallback(async (leadIds) => {
     setEnrichmentRunning(true);
     setEnrichmentResult(null);
     setError(null);
 
-    const BATCH_SIZE = 5; // AI discovery is slower — 5 leads per API call
+    const BATCH_SIZE = 10;
     const aggregated = {
       total: leadIds.length,
       found: 0,

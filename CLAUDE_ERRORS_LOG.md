@@ -84,6 +84,34 @@ antes de concluir el diagnostico.
 
 ---
 
+## Error #3: `updated_at` inexistente en `growth_email_drafts` (2026-02-23)
+
+**Archivo afectado:** `src/hooks/useGrowthSystem.js`
+
+**Descripcion del bug:** Al editar y guardar un borrador (subject/body), Supabase retornaba:
+`"Could not find the 'updated_at' column of 'growth_email_drafts' in the schema cache"`
+
+**Causa raiz:** La funcion `updateDraftContent()` agregaba `updated_at` a los campos de update:
+```javascript
+// MAL - growth_email_drafts NO tiene columna updated_at
+const updates = { updated_at: new Date().toISOString() };
+```
+
+Segun la migracion `001_growth_system_tables.sql`:
+- `growth_leads` SI tiene `updated_at` (linea 39)
+- `growth_email_drafts` NO tiene `updated_at` — solo tiene `created_at` y `reviewed_at`
+
+**Fix aplicado:** Cambiar a `const updates = {}` — solo se envian los campos que realmente
+se modifican (subject, body).
+
+**Leccion aprendida:**
+- SIEMPRE verificar el schema de la tabla en las migraciones antes de hacer `.update()`.
+  No todas las tablas tienen las mismas columnas convencionales.
+- No copiar patrones de una tabla a otra sin verificar que comparten el mismo schema.
+  (`growth_leads` tiene `updated_at`, `growth_email_drafts` no).
+
+---
+
 ## Patrones generales a evitar
 
 ### 1. Selects explicitos sin verificar el schema
@@ -126,7 +154,15 @@ el dropdown de DraftReviewModal no deberia filtrar por status.
 // (sin filtro de status)
 ```
 
-### 5. Diagnosticar sin verificar - el "fix-and-pray"
+### 5. Escribir en columnas que no existen en la tabla
+Antes de hacer `.update({ campo: valor })`, verificar en las migraciones que la tabla
+tiene esa columna. No asumir que todas las tablas tienen `updated_at`.
+```
+-- growth_leads: tiene updated_at ✓
+-- growth_email_drafts: NO tiene updated_at ✗ (solo created_at y reviewed_at)
+```
+
+### 6. Diagnosticar sin verificar - el "fix-and-pray"
 Antes de commitear un fix, SIEMPRE trazar el flujo completo:
 1. Que datos existen en la DB? (mirar screenshots, preguntar al usuario)
 2. Que query se ejecuta? (leer la query exacta)

@@ -1,4 +1,8 @@
 {
+  "functions": {
+    "api/email-discovery-ai.js": { "maxDuration": 60 },
+    "api/vertex-email-search.js": { "maxDuration": 60 }
+  },
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/$1" },
     { "source": "/(.*)", "destination": "/index.html" }
