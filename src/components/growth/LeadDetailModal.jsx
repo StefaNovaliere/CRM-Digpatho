@@ -322,7 +322,8 @@ export const LeadDetailModal = ({ lead, onClose, onSave, onPromote, onIgnore, on
                 {!discoveryResult && lead.email_discovery_method && (
                   <div className="mt-1.5 flex items-center gap-2 flex-wrap">
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded-full bg-blue-50 text-blue-700">
-                      {lead.email_discovery_method === 'ai_web_search' ? 'AI Web Search' :
+                      {lead.email_discovery_method === 'vertex_ai_search' ? 'Vertex AI Search' :
+                       lead.email_discovery_method === 'ai_web_search' ? 'AI Web Search' :
                        lead.email_discovery_method === 'google_snippet' ? 'Google Snippet' :
                        'Manual'}
                     </span>
