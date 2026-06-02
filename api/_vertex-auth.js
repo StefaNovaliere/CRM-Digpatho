@@ -132,7 +132,7 @@ export async function getVertexAccessToken(req) {
 // projectId: env override → parseado del email del SA en la URL de impersonación.
 // region: env override → us-central1.
 export function getVertexConfig() {
-  const region = process.env.VERTEX_AI_REGION || 'us-central1';
+  const region = process.env.VERTEX_AI_REGION || 'global';
 
   let projectId = process.env.VERTEX_AI_PROJECT_ID || null;
   if (!projectId) {
