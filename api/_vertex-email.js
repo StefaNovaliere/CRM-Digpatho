@@ -6,7 +6,7 @@
 
 import { getVertexAccessToken, getVertexConfig } from './_vertex-auth.js';
 
-const VERTEX_MODEL = 'gemini-2.0-flash';
+const VERTEX_MODEL = process.env.VERTEX_AI_MODEL || 'gemini-2.5-flash';
 const RETRY_DELAYS = [2000, 4000, 8000];
 
 function buildPrompt(contact) {
@@ -54,7 +54,11 @@ If you cannot find an email, set found to false and explain in notes why.`;
 }
 
 function buildVertexEndpoint(projectId, region) {
-  return `https://${region}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${region}/publishers/google/models/${VERTEX_MODEL}:generateContent`;
+  // La región `global` usa el host sin prefijo; las regionales lo llevan.
+  const host = region === 'global'
+    ? 'aiplatform.googleapis.com'
+    : `${region}-aiplatform.googleapis.com`;
+  return `https://${host}/v1/projects/${projectId}/locations/${region}/publishers/google/models/${VERTEX_MODEL}:generateContent`;
 }
 
 function parseGeminiResponse(apiResponse) {
@@ -123,7 +127,10 @@ export async function discoverEmailForContact(accessToken, config, contact) {
     tools: [{ google_search: {} }],
     generationConfig: {
       temperature: 0.2,
-      maxOutputTokens: 1024,
+      maxOutputTokens: 2048,
+      // gemini-2.5-flash tiene "thinking" on por defecto, que consume tokens
+      // de salida. Para esta extracción simple lo desactivamos.
+      thinkingConfig: { thinkingBudget: 0 },
     },
   });
 
