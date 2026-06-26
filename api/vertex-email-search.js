@@ -50,8 +50,16 @@ export default async function handler(req, res) {
 
     const results = [];
     let consecutiveRateLimits = 0;
+    const startTime = Date.now();
+    const TIME_LIMIT_MS = 50_000;
+    let truncated = false;
 
     for (let i = 0; i < normalized.length; i++) {
+      if (Date.now() - startTime > TIME_LIMIT_MS) {
+        truncated = true;
+        break;
+      }
+
       const contact = normalized[i];
 
       const result = await discoverEmailForContact(accessToken, config, {
@@ -111,8 +119,11 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       success: true,
+      truncated,
       summary: {
-        total: results.length,
+        total: normalized.length,
+        processed: results.length,
+        remaining: normalized.length - results.length,
         found,
         not_found: notFound,
         errors: errored,

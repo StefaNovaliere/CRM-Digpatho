@@ -126,6 +126,28 @@ export const BulkEmail = () => {
     setShowQueueModal(true);
   };
 
+  // Reintentar campaña fallida: resetear emails fallidos a "pending"
+  const handleRetryCampaign = async (campaign) => {
+    const { error: queueError } = await supabase
+      .from('bulk_email_queue')
+      .update({ status: 'pending', error_message: null })
+      .eq('campaign_id', campaign.id)
+      .eq('status', 'failed');
+
+    if (queueError) {
+      console.error('Error resetting failed emails:', queueError);
+      return;
+    }
+
+    await supabase
+      .from('bulk_email_campaigns')
+      .update({ status: 'ready' })
+      .eq('id', campaign.id);
+
+    await loadCampaigns();
+    setSendingCampaign({ ...campaign, status: 'ready' });
+  };
+
   // Iniciar envío
   const handleStartSending = (campaign) => {
     setSendingCampaign(campaign);
@@ -310,6 +332,30 @@ export const BulkEmail = () => {
                         title="Iniciar envío"
                       >
                         <Play size={18} />
+                      </button>
+                    )}
+
+                    {/* Reintentar fallidos */}
+                    {campaign.status === 'failed' && (
+                      <button
+                        onClick={() => handleRetryCampaign(campaign)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-amber-600 bg-amber-50 hover:bg-amber-100 rounded-lg transition-colors"
+                        title="Reintentar emails fallidos"
+                      >
+                        <RefreshCw size={14} />
+                        Reintentar
+                      </button>
+                    )}
+
+                    {/* Reintentar fallidos de campaña completada con errores */}
+                    {campaign.status === 'completed' && campaign.failed_count > 0 && (
+                      <button
+                        onClick={() => handleRetryCampaign(campaign)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-amber-600 bg-amber-50 hover:bg-amber-100 rounded-lg transition-colors"
+                        title="Reintentar emails fallidos"
+                      >
+                        <RefreshCw size={14} />
+                        Reintentar ({campaign.failed_count})
                       </button>
                     )}
 

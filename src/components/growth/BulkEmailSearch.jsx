@@ -172,6 +172,7 @@ export const BulkEmailSearch = () => {
   const [results, setResults] = useState([]);
   const [summary, setSummary] = useState(null);
   const [searchError, setSearchError] = useState(null);
+  const [truncatedInfo, setTruncatedInfo] = useState(null);
   const [copiedEmail, setCopiedEmail] = useState(null);
   const fileInputRef = useRef(null);
 
@@ -222,6 +223,7 @@ export const BulkEmailSearch = () => {
     setSearchError(null);
     setResults([]);
     setSummary(null);
+    setTruncatedInfo(null);
     setSelectedForSave(new Set());
     setSaveResult(null);
 
@@ -246,6 +248,13 @@ export const BulkEmailSearch = () => {
 
       setResults(data.results || []);
       setSummary(data.summary || null);
+      if (data.truncated) {
+        setTruncatedInfo({
+          processed: data.summary?.processed || 0,
+          remaining: data.summary?.remaining || 0,
+          total: data.summary?.total || 0,
+        });
+      }
 
       // Auto-select all found results for save
       const foundIndices = new Set();
@@ -511,7 +520,10 @@ export const BulkEmailSearch = () => {
           <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 bg-gray-50">
             <div className="flex items-center gap-4 text-sm">
               <span className="text-gray-500">
-                Total: <strong className="text-gray-900">{summary.total}</strong>
+                {truncatedInfo
+                  ? <>Procesados: <strong className="text-gray-900">{summary.processed}</strong> / {summary.total}</>
+                  : <>Total: <strong className="text-gray-900">{summary.total}</strong></>
+                }
               </span>
               <span className="text-green-600">
                 Encontrados: <strong>{summary.found}</strong>
@@ -542,6 +554,18 @@ export const BulkEmailSearch = () => {
               </button>
             </div>
           </div>
+
+          {/* Truncation warning */}
+          {truncatedInfo && (
+            <div className="flex items-start gap-2 px-5 py-3 bg-amber-50 border-b border-amber-200 text-sm text-amber-800">
+              <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />
+              <span>
+                Se procesaron <strong>{truncatedInfo.processed}</strong> de <strong>{truncatedInfo.total}</strong> contactos
+                por límite de tiempo. Los <strong>{truncatedInfo.remaining}</strong> restantes no fueron buscados.
+                Podés buscarlos en otra tanda.
+              </span>
+            </div>
+          )}
 
           {/* Results table */}
           <div className="divide-y divide-gray-100 max-h-[500px] overflow-y-auto">
