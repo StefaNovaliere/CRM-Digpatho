@@ -7,7 +7,8 @@ import {
   CheckCircle,
   Loader2,
   AlertTriangle,
-  Paperclip
+  Paperclip,
+  RefreshCw
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../hooks/useAuth';
@@ -77,47 +78,61 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
     setLogs(prev => [...prev, { message, type, timestamp }].slice(-50));
   };
 
-  // Obtener access token válido (del remitente seleccionado)
-  const getValidAccessToken = async () => {
+  // Refrescar access token usando el refresh token
+  const refreshAccessToken = async () => {
     const sender = senderProfile || profile;
     const senderId = campaign.sender_id || user?.id;
 
-    if (!sender?.google_access_token) {
-      throw new Error(`No hay token de Gmail para el remitente. Pedile que inicie sesión nuevamente.`);
+    if (!sender?.google_refresh_token) {
+      throw new Error('No hay refresh token. El remitente debe iniciar sesión nuevamente.');
     }
 
-    // Verificar si el token está por expirar
+    const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+    const clientSecret = import.meta.env.VITE_GOOGLE_CLIENT_SECRET;
+
+    const response = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: sender.google_refresh_token,
+        grant_type: 'refresh_token',
+      }),
+    });
+
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      if (errData.error === 'invalid_grant') {
+        throw new Error('El refresh token expiró o fue revocado. El remitente debe iniciar sesión nuevamente en el CRM.');
+      }
+      throw new Error('Error al refrescar token del remitente');
+    }
+    const data = await response.json();
+
+    const newExpiresAt = new Date();
+    newExpiresAt.setSeconds(newExpiresAt.getSeconds() + (data.expires_in || 3600));
+
+    await supabase.from('user_profiles').update({
+      google_access_token: data.access_token,
+      google_token_expires_at: newExpiresAt.toISOString(),
+    }).eq('id', senderId);
+
+    return data.access_token;
+  };
+
+  // Obtener access token válido (del remitente seleccionado)
+  const getValidAccessToken = async () => {
+    const sender = senderProfile || profile;
+
+    if (!sender?.google_access_token) {
+      throw new Error('No hay token de Gmail para el remitente. Pedile que inicie sesión nuevamente.');
+    }
+
     if (sender.google_token_expires_at) {
       const expiresAt = new Date(sender.google_token_expires_at);
       if (expiresAt.getTime() - Date.now() < 5 * 60 * 1000) {
-        // Refrescar token
-        const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
-        const clientSecret = import.meta.env.VITE_GOOGLE_CLIENT_SECRET;
-
-        const response = await fetch('https://oauth2.googleapis.com/token', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({
-            client_id: clientId,
-            client_secret: clientSecret,
-            refresh_token: sender.google_refresh_token,
-            grant_type: 'refresh_token',
-          }),
-        });
-
-        if (!response.ok) throw new Error('Error al refrescar token del remitente');
-        const data = await response.json();
-
-        // Actualizar en DB
-        const newExpiresAt = new Date();
-        newExpiresAt.setSeconds(newExpiresAt.getSeconds() + (data.expires_in || 3600));
-
-        await supabase.from('user_profiles').update({
-          google_access_token: data.access_token,
-          google_token_expires_at: newExpiresAt.toISOString(),
-        }).eq('id', senderId);
-
-        return data.access_token;
+        return await refreshAccessToken();
       }
     }
 
@@ -345,8 +360,29 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
             addLog('Token refrescado', 'info');
           }
 
-          // Enviar (con adjunto si existe)
-          const result = await sendSingleEmail(queueItem, accessToken, attachmentData);
+          // Enviar — si falla por auth, refrescar token y reintentar una vez
+          let result;
+          try {
+            result = await sendSingleEmail(queueItem, accessToken, attachmentData);
+          } catch (sendErr) {
+            const isAuthError = sendErr.message?.includes('invalid authentication credentials')
+              || sendErr.message?.includes('Invalid Credentials')
+              || sendErr.message?.includes('401');
+            if (isAuthError) {
+              addLog('Token inválido — refrescando...', 'warning');
+              try {
+                accessToken = await refreshAccessToken();
+                addLog('Token refrescado exitosamente', 'success');
+                result = await sendSingleEmail(queueItem, accessToken, attachmentData);
+              } catch (refreshErr) {
+                throw new Error(refreshErr.message?.includes('iniciar sesión')
+                  ? refreshErr.message
+                  : sendErr.message);
+              }
+            } else {
+              throw sendErr;
+            }
+          }
 
           // Marcar como enviado
           await supabase
@@ -375,9 +411,7 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
           }
 
           if (targetContactId) {
-            // Preparamos el contenido visible en el historial
             let historyContent = queueItem.body;
-            // Si hubo CC, lo agregamos al historial
             if (queueItem.cc_emails && Array.isArray(queueItem.cc_emails) && queueItem.cc_emails.length > 0) {
                 historyContent = `[CC: ${queueItem.cc_emails.join(', ')}]\n\n${historyContent}`;
             }
@@ -399,7 +433,17 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
           addLog(`✓ Enviado a ${queueItem.to_email}`, 'success');
 
         } catch (emailError) {
-          // Marcar como fallido
+          // Si es error de auth irrecuperable, parar todo el envío
+          if (emailError.message?.includes('iniciar sesión')) {
+            addLog(`⚠ ${emailError.message}`, 'error');
+            // Revertir el item actual a pending
+            await supabase
+              .from('bulk_email_queue')
+              .update({ status: 'pending' })
+              .eq('id', queueItem.id);
+            throw emailError;
+          }
+
           await supabase
             .from('bulk_email_queue')
             .update({
@@ -656,10 +700,32 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
               )}
 
               {(status === 'completed' || status === 'error') && (
-                <button onClick={onComplete} className="btn-primary">
-                  <CheckCircle className="w-4 h-4" />
-                  Cerrar
-                </button>
+                <>
+                  {progress.failed > 0 && (
+                    <button
+                      onClick={async () => {
+                        await supabase
+                          .from('bulk_email_queue')
+                          .update({ status: 'pending', error_message: null })
+                          .eq('campaign_id', campaign.id)
+                          .eq('status', 'failed');
+                        setProgress(prev => ({ ...prev, failed: 0 }));
+                        setStatus('ready');
+                        setError(null);
+                        addLog(`${progress.failed} emails fallidos reseteados — listos para reintentar`, 'info');
+                        await loadProgress();
+                      }}
+                      className="btn-secondary"
+                    >
+                      <RefreshCw className="w-4 h-4" />
+                      Reintentar fallidos ({progress.failed})
+                    </button>
+                  )}
+                  <button onClick={onComplete} className="btn-primary">
+                    <CheckCircle className="w-4 h-4" />
+                    Cerrar
+                  </button>
+                </>
               )}
             </div>
           </div>
