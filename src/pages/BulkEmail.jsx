@@ -298,15 +298,24 @@ export const BulkEmail = () => {
                           </span>
                         </>
                       )}
-                      {campaign.attachment_name && (
-                        <>
-                          <span>•</span>
-                          <span className="flex items-center gap-1 text-primary-600">
-                            <Paperclip size={13} />
-                            {campaign.attachment_name}
-                          </span>
-                        </>
-                      )}
+                      {(() => {
+                        const attCount = Array.isArray(campaign.attachments) && campaign.attachments.length > 0
+                          ? campaign.attachments.length
+                          : (campaign.attachment_name ? 1 : 0);
+                        if (attCount === 0) return null;
+                        const label = attCount === 1
+                          ? (Array.isArray(campaign.attachments) && campaign.attachments[0]?.name) || campaign.attachment_name
+                          : `${attCount} adjuntos`;
+                        return (
+                          <>
+                            <span>•</span>
+                            <span className="flex items-center gap-1 text-primary-600">
+                              <Paperclip size={13} />
+                              {label}
+                            </span>
+                          </>
+                        );
+                      })()}
                       <span>•</span>
                       <span>
                         {format(new Date(campaign.created_at), "d MMM yyyy", { locale: es })}

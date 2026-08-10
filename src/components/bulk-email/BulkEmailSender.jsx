@@ -140,7 +140,7 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
   };
 
   // Enviar un email (con o sin adjunto)
-  const sendSingleEmail = async (queueItem, accessToken, attachmentData) => {
+  const sendSingleEmail = async (queueItem, accessToken, attachments) => {
     const sender = senderProfile || profile;
     const fromEmail = sender?.email || user?.email || profile?.email;
     const fromName = sender?.full_name || 'Digpatho';
@@ -160,10 +160,11 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
       }
     }
 
+    const attachmentList = Array.isArray(attachments) ? attachments : (attachments ? [attachments] : []);
     let emailContent;
 
-    if (attachmentData) {
-      // --- MIME multipart/mixed con adjunto ---
+    if (attachmentList.length > 0) {
+      // --- MIME multipart/mixed con uno o más adjuntos ---
       const boundary = `boundary_${Date.now()}_${Math.random().toString(36).substring(2)}`;
 
       const headers = [
@@ -189,21 +190,21 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
         wrapBase64(btoa(unescape(encodeURIComponent(fullBody))))
       ].join('\r\n');
 
-      // Parte 2: archivo adjunto
-      const attachmentPart = [
+      // Parte 2..N: archivos adjuntos
+      const attachmentParts = attachmentList.map(att => [
         `--${boundary}`,
-        `Content-Type: ${attachmentData.contentType}; name="${attachmentData.name}"`,
+        `Content-Type: ${att.contentType}; name="${att.name}"`,
         'Content-Transfer-Encoding: base64',
-        `Content-Disposition: attachment; filename="${attachmentData.name}"`,
+        `Content-Disposition: attachment; filename="${att.name}"`,
         '',
-        wrapBase64(attachmentData.base64)
-      ].join('\r\n');
+        wrapBase64(att.base64)
+      ].join('\r\n'));
 
       emailContent = [
         ...headers,
         '',
         bodyPart,
-        attachmentPart,
+        ...attachmentParts,
         `--${boundary}--`
       ].join('\r\n');
 
@@ -272,15 +273,28 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
       let accessToken = await getValidAccessToken();
       addLog('Token de Gmail obtenido', 'success');
 
-      // Cargar adjunto de la campaña (una sola vez)
-      let attachmentData = null;
-      if (campaign.attachment_base64 && campaign.attachment_name) {
-        // Adjunto guardado como base64 directamente en la campaña
-        attachmentData = {
+      // Cargar adjuntos de la campaña (una sola vez).
+      // Preferimos el array `attachments` (múltiples); si no existe, caemos al
+      // adjunto único legacy (attachment_base64 / attachment_name).
+      let attachmentsData = [];
+      if (Array.isArray(campaign.attachments) && campaign.attachments.length > 0) {
+        attachmentsData = campaign.attachments
+          .filter(a => a && a.base64 && a.name)
+          .map(a => ({
+            name: a.name,
+            contentType: a.content_type || 'application/octet-stream',
+            base64: a.base64,
+          }));
+        if (attachmentsData.length > 0) {
+          addLog(`${attachmentsData.length} adjunto(s) cargado(s): ${attachmentsData.map(a => a.name).join(', ')}`, 'success');
+        }
+      } else if (campaign.attachment_base64 && campaign.attachment_name) {
+        // Legacy: adjunto único guardado como base64 en la campaña
+        attachmentsData = [{
           name: campaign.attachment_name,
           contentType: campaign.attachment_content_type || 'application/octet-stream',
-          base64: campaign.attachment_base64
-        };
+          base64: campaign.attachment_base64,
+        }];
         const sizeKB = campaign.attachment_size ? (campaign.attachment_size / 1024).toFixed(1) : '?';
         addLog(`Adjunto cargado: ${campaign.attachment_name} (${sizeKB} KB)`, 'success');
       } else if (campaign.attachment_path && campaign.attachment_name) {
@@ -301,11 +315,11 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
           }
           const base64 = btoa(binary);
 
-          attachmentData = {
+          attachmentsData = [{
             name: campaign.attachment_name,
             contentType: campaign.attachment_content_type || 'application/octet-stream',
-            base64: base64
-          };
+            base64: base64,
+          }];
           addLog(`Adjunto cargado: ${campaign.attachment_name} (${(fileBlob.size / 1024).toFixed(1)} KB)`, 'success');
         } catch (attachErr) {
           addLog(`Error al descargar adjunto: ${attachErr.message}. Se enviará sin adjunto.`, 'warning');
@@ -363,7 +377,7 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
           // Enviar — si falla por auth, refrescar token y reintentar una vez
           let result;
           try {
-            result = await sendSingleEmail(queueItem, accessToken, attachmentData);
+            result = await sendSingleEmail(queueItem, accessToken, attachmentsData);
           } catch (sendErr) {
             const isAuthError = sendErr.message?.includes('invalid authentication credentials')
               || sendErr.message?.includes('Invalid Credentials')
@@ -373,7 +387,7 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
               try {
                 accessToken = await refreshAccessToken();
                 addLog('Token refrescado exitosamente', 'success');
-                result = await sendSingleEmail(queueItem, accessToken, attachmentData);
+                result = await sendSingleEmail(queueItem, accessToken, attachmentsData);
               } catch (refreshErr) {
                 throw new Error(refreshErr.message?.includes('iniciar sesión')
                   ? refreshErr.message
@@ -542,16 +556,27 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
           {/* Progress */}
           <div className="p-6">
             {/* Attachment Info */}
-            {campaign.attachment_name && (
-              <div className="mb-4 p-3 bg-primary-50 border border-primary-200 rounded-xl flex items-center gap-3">
-                <Paperclip className="w-5 h-5 text-primary-500 flex-shrink-0" />
-                <p className="text-sm text-primary-700">
-                  <strong>Adjunto:</strong> {campaign.attachment_name}
-                  {campaign.attachment_size && ` (${(campaign.attachment_size / 1024).toFixed(1)} KB)`}
-                  — se incluirá en cada email
-                </p>
-              </div>
-            )}
+            {(() => {
+              const list = Array.isArray(campaign.attachments) && campaign.attachments.length > 0
+                ? campaign.attachments.map(a => ({ name: a.name, size: a.size }))
+                : (campaign.attachment_name ? [{ name: campaign.attachment_name, size: campaign.attachment_size }] : []);
+              if (list.length === 0) return null;
+              return (
+                <div className="mb-4 p-3 bg-primary-50 border border-primary-200 rounded-xl flex items-start gap-3">
+                  <Paperclip className="w-5 h-5 text-primary-500 flex-shrink-0 mt-0.5" />
+                  <div className="text-sm text-primary-700">
+                    <strong>{list.length === 1 ? 'Adjunto' : `${list.length} adjuntos`}</strong> — se {list.length === 1 ? 'incluirá' : 'incluirán'} en cada email:
+                    <ul className="mt-1 space-y-0.5">
+                      {list.map((a, idx) => (
+                        <li key={idx}>
+                          • {a.name}{a.size ? ` (${(a.size / 1024).toFixed(1)} KB)` : ''}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Progress Bar */}
             <div className="mb-6">

@@ -64,7 +64,7 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
   const [warning, setWarning] = useState(null);
   const [previewEmail, setPreviewEmail] = useState(null);
   const [ccEmails, setCcEmails] = useState(''); // Campo CC global para toda la campaña
-  const [attachmentFile, setAttachmentFile] = useState(null); // Archivo adjunto para toda la campaña
+  const [attachmentFiles, setAttachmentFiles] = useState([]); // Archivos adjuntos para toda la campaña
   const [senderUsers, setSenderUsers] = useState([]); // Usuarios con Gmail conectado
   const [selectedSenderId, setSelectedSenderId] = useState(user?.id || ''); // Remitente seleccionado
 
@@ -345,34 +345,34 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
     setError(null);
 
     try {
-      // 0. Convertir adjunto a base64 si existe (sin depender de Supabase Storage)
-      let attachmentData = null;
-      if (attachmentFile) {
-        try {
-          const base64 = await new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => {
-              const arrayBuffer = reader.result;
-              const bytes = new Uint8Array(arrayBuffer);
-              let binary = '';
-              for (let i = 0; i < bytes.length; i++) {
-                binary += String.fromCharCode(bytes[i]);
-              }
-              resolve(btoa(binary));
-            };
-            reader.onerror = () => reject(new Error('Error al leer el archivo'));
-            reader.readAsArrayBuffer(attachmentFile);
-          });
+      // 0. Convertir adjuntos a base64 si existen (sin depender de Supabase Storage)
+      const fileToBase64 = (f) => new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const bytes = new Uint8Array(reader.result);
+          let binary = '';
+          for (let i = 0; i < bytes.length; i++) {
+            binary += String.fromCharCode(bytes[i]);
+          }
+          resolve(btoa(binary));
+        };
+        reader.onerror = () => reject(new Error('Error al leer el archivo'));
+        reader.readAsArrayBuffer(f);
+      });
 
-          attachmentData = {
-            name: attachmentFile.name,
-            content_type: attachmentFile.type || 'application/octet-stream',
-            size: attachmentFile.size,
-            base64: base64,
-          };
+      const attachmentsData = [];
+      for (const f of attachmentFiles) {
+        try {
+          const base64 = await fileToBase64(f);
+          attachmentsData.push({
+            name: f.name,
+            content_type: f.type || 'application/octet-stream',
+            size: f.size,
+            base64,
+          });
         } catch (readErr) {
-          console.warn('No se pudo leer el adjunto:', readErr.message);
-          setWarning(`No se pudo leer el adjunto: ${readErr.message}. La campaña se creará sin adjunto.`);
+          console.warn('No se pudo leer el adjunto:', f.name, readErr.message);
+          setWarning(`No se pudo leer el adjunto "${f.name}": ${readErr.message}. Se omitirá.`);
         }
       }
 
@@ -385,16 +385,20 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
         sender_id: selectedSenderId || user.id
       };
 
-      // Agregar datos del adjunto si existe
-      if (attachmentData) {
-        campaignInsert.attachment_name = attachmentData.name;
-        campaignInsert.attachment_content_type = attachmentData.content_type;
-        campaignInsert.attachment_size = attachmentData.size;
-        campaignInsert.attachment_base64 = attachmentData.base64;
+      // Agregar datos de los adjuntos si existen
+      if (attachmentsData.length > 0) {
+        // Array completo (soporta múltiples adjuntos)
+        campaignInsert.attachments = attachmentsData;
+        // Legacy: guardar el primero también en las columnas viejas por retrocompatibilidad
+        const first = attachmentsData[0];
+        campaignInsert.attachment_name = first.name;
+        campaignInsert.attachment_content_type = first.content_type;
+        campaignInsert.attachment_size = first.size;
+        campaignInsert.attachment_base64 = first.base64;
       }
 
       // Campos opcionales que pueden no existir en la tabla aún
-      const optionalFields = ['sender_id', 'attachment_name', 'attachment_content_type', 'attachment_size', 'attachment_base64'];
+      const optionalFields = ['sender_id', 'attachments', 'attachment_name', 'attachment_content_type', 'attachment_size', 'attachment_base64'];
 
       let campaign;
       let insertPayload = { ...campaignInsert };
@@ -419,7 +423,10 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
 
         if (missingCol) {
           console.warn(`Columna "${missingCol}" no existe en bulk_email_campaigns, reintentando sin ella.`);
-          if (missingCol.startsWith('attachment_')) {
+          if (missingCol === 'attachments' && attachmentsData.length > 1) {
+            setWarning(prev => (prev ? prev + ' ' : '') +
+              'Falta la columna "attachments" en la base de datos: solo se guardará el primer adjunto. Ejecutá la migración 008 para habilitar múltiples adjuntos.');
+          } else if (missingCol.startsWith('attachment_')) {
             setWarning(prev => prev
               ? prev + ' Además, el adjunto no se pudo guardar (columna faltante en la base de datos).'
               : 'El adjunto no se pudo guardar porque falta la columna en la base de datos. Ejecutá el SQL de migración.');
@@ -709,59 +716,71 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
                   </p>
                 </div>
 
-                {/* Archivo adjunto */}
+                {/* Archivos adjuntos */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     <Paperclip className="w-4 h-4 inline mr-1" />
-                    Archivo adjunto (se envía a todos los emails)
+                    Archivos adjuntos (se envían a todos los emails)
                   </label>
-                  {!attachmentFile ? (
-                    <label className="block cursor-pointer">
-                      <div className="border-2 border-dashed border-gray-300 rounded-xl p-4 hover:border-primary-400 hover:bg-primary-50/50 transition-all text-center">
-                        <Upload className="w-6 h-6 text-gray-400 mx-auto mb-1" />
-                        <p className="text-sm text-gray-600">
-                          Click para seleccionar archivo
-                        </p>
-                        <p className="text-xs text-gray-400 mt-1">
-                          PDF, Word, Excel, imágenes, etc. (máx. 10 MB)
-                        </p>
-                      </div>
-                      <input
-                        type="file"
-                        onChange={(e) => {
-                          const f = e.target.files[0];
-                          if (!f) return;
-                          if (f.size > 10 * 1024 * 1024) {
-                            setError('El archivo adjunto no puede superar los 10 MB');
-                            return;
-                          }
-                          setAttachmentFile(f);
-                        }}
-                        className="hidden"
-                      />
-                    </label>
-                  ) : (
-                    <div className="flex items-center justify-between p-3 bg-primary-50 border border-primary-200 rounded-xl">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <Paperclip className="w-5 h-5 text-primary-500 flex-shrink-0" />
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium text-gray-900 truncate">{attachmentFile.name}</p>
-                          <p className="text-xs text-gray-500">
-                            {(attachmentFile.size / 1024).toFixed(1)} KB
-                          </p>
+
+                  {/* Lista de adjuntos cargados */}
+                  {attachmentFiles.length > 0 && (
+                    <div className="space-y-2 mb-2">
+                      {attachmentFiles.map((f, idx) => (
+                        <div key={idx} className="flex items-center justify-between p-3 bg-primary-50 border border-primary-200 rounded-xl">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <Paperclip className="w-5 h-5 text-primary-500 flex-shrink-0" />
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-gray-900 truncate">{f.name}</p>
+                              <p className="text-xs text-gray-500">{(f.size / 1024).toFixed(1)} KB</p>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => setAttachmentFiles(prev => prev.filter((_, i) => i !== idx))}
+                            className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg flex-shrink-0"
+                            title="Quitar adjunto"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
                         </div>
-                      </div>
-                      <button
-                        onClick={() => setAttachmentFile(null)}
-                        className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg flex-shrink-0"
-                        title="Quitar adjunto"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      ))}
                     </div>
                   )}
+
+                  {/* Selector para agregar más */}
+                  <label className="block cursor-pointer">
+                    <div className="border-2 border-dashed border-gray-300 rounded-xl p-4 hover:border-primary-400 hover:bg-primary-50/50 transition-all text-center">
+                      <Upload className="w-6 h-6 text-gray-400 mx-auto mb-1" />
+                      <p className="text-sm text-gray-600">
+                        {attachmentFiles.length > 0 ? 'Agregar otro archivo' : 'Click para seleccionar archivos'}
+                      </p>
+                      <p className="text-xs text-gray-400 mt-1">
+                        PDF, Word, Excel, imágenes, etc. Podés seleccionar varios. (máx. 25 MB en total)
+                      </p>
+                    </div>
+                    <input
+                      type="file"
+                      multiple
+                      onChange={(e) => {
+                        const newFiles = Array.from(e.target.files || []);
+                        if (newFiles.length === 0) return;
+                        const currentTotal = attachmentFiles.reduce((acc, f) => acc + f.size, 0);
+                        const addedTotal = newFiles.reduce((acc, f) => acc + f.size, 0);
+                        // Gmail permite ~25 MB por email (incluyendo overhead base64)
+                        if (currentTotal + addedTotal > 25 * 1024 * 1024) {
+                          setError('El total de adjuntos no puede superar los 25 MB (límite de Gmail).');
+                          e.target.value = '';
+                          return;
+                        }
+                        setError(null);
+                        setAttachmentFiles(prev => [...prev, ...newFiles]);
+                        e.target.value = '';
+                      }}
+                      className="hidden"
+                    />
+                  </label>
                   <p className="text-xs text-gray-500 mt-1">
-                    Opcional. Este archivo se adjuntará a cada email de la campaña.
+                    Opcional. Estos archivos se adjuntarán a cada email de la campaña.
                   </p>
                 </div>
 
@@ -918,12 +937,21 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
                   </div>
                 </div>
 
-                {attachmentFile && (
-                  <div className="p-4 bg-primary-50 border border-primary-200 rounded-xl flex items-center gap-3">
-                    <Paperclip className="w-5 h-5 text-primary-500 flex-shrink-0" />
-                    <p className="text-sm text-primary-700">
-                      <strong>Adjunto:</strong> {attachmentFile.name} ({(attachmentFile.size / 1024).toFixed(1)} KB) — se enviará con cada email
-                    </p>
+                {attachmentFiles.length > 0 && (
+                  <div className="p-4 bg-primary-50 border border-primary-200 rounded-xl">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Paperclip className="w-5 h-5 text-primary-500 flex-shrink-0" />
+                      <p className="text-sm font-medium text-primary-700">
+                        {attachmentFiles.length} adjunto{attachmentFiles.length !== 1 ? 's' : ''} — se {attachmentFiles.length !== 1 ? 'enviarán' : 'enviará'} con cada email
+                      </p>
+                    </div>
+                    <ul className="ml-7 space-y-0.5">
+                      {attachmentFiles.map((f, idx) => (
+                        <li key={idx} className="text-sm text-primary-600">
+                          • {f.name} ({(f.size / 1024).toFixed(1)} KB)
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                 )}
 
