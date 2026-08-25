@@ -5,6 +5,12 @@ import {
   Globe, MapPin, Hash, Cpu, Target, Save, Loader2
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import {
+  PIPELINE_STAGES,
+  PRIORITY_LEVELS,
+  SPECIALTIES,
+  SOCIETIES,
+} from '../../config/constants';
 
 // ========================================
 // OPCIONES DE SELECT
@@ -19,14 +25,6 @@ const ROLE_OPTIONS = [
   { value: 'lab_manager', label: 'Gerente de Laboratorio' },
   { value: 'procurement', label: 'Compras/Adquisiciones' },
   { value: 'other', label: 'Otro' },
-];
-
-const INTEREST_OPTIONS = [
-  { value: 'cold', label: '❄️ Frío' },
-  { value: 'warm', label: '🌤️ Tibio' },
-  { value: 'hot', label: '🔥 Caliente' },
-  { value: 'customer', label: '✅ Cliente' },
-  { value: 'churned', label: '⚠️ Ex-cliente' },
 ];
 
 const INSTITUTION_TYPE_OPTIONS = [
@@ -54,10 +52,14 @@ const COUNTRY_OPTIONS = [
   'China', 'Japón', 'Australia', 'Otro'
 ];
 
+// El input date espera 'YYYY-MM-DD'; la columna es timestamptz.
+const toDateInput = (value) => (value ? new Date(value).toISOString().slice(0, 10) : '');
+
 export const ContactForm = ({ contact, onClose, onSuccess }) => {
   const isEditing = !!contact;
   const [loading, setLoading] = useState(false);
   const [institutions, setInstitutions] = useState([]);
+  const [teamUsers, setTeamUsers] = useState([]);
   const [formData, setFormData] = useState({
     first_name: '',
     last_name: '',
@@ -75,7 +77,14 @@ export const ContactForm = ({ contact, onClose, onSuccess }) => {
     geographic_scope: '',
     annual_cases: '',
     uses_ai_pathology: null,
-    interest_level: 'cold',
+    // Pipeline comercial (migración 009)
+    stage: 'new',
+    priority: 'media',
+    assigned_to: '',
+    next_followup_at: '',
+    specialty: '',
+    society: '',
+    is_kol: false,
     source: '',
     tags: [],
     ai_context: ''
@@ -84,6 +93,7 @@ export const ContactForm = ({ contact, onClose, onSuccess }) => {
 
   useEffect(() => {
     loadInstitutions();
+    loadTeamUsers();
     if (contact) {
       setFormData({
         first_name: contact.first_name || '',
@@ -102,13 +112,27 @@ export const ContactForm = ({ contact, onClose, onSuccess }) => {
         geographic_scope: contact.geographic_scope || '',
         annual_cases: contact.annual_cases || '',
         uses_ai_pathology: contact.uses_ai_pathology,
-        interest_level: contact.interest_level || 'cold',
+        stage: contact.stage || 'new',
+        priority: contact.priority || 'media',
+        assigned_to: contact.assigned_to || '',
+        next_followup_at: toDateInput(contact.next_followup_at),
+        specialty: contact.specialty || '',
+        society: contact.society || '',
+        is_kol: !!contact.is_kol,
         source: contact.source || '',
         tags: contact.tags || [],
         ai_context: contact.ai_context || ''
       });
     }
   }, [contact]);
+
+  const loadTeamUsers = async () => {
+    const { data } = await supabase
+      .from('user_profiles')
+      .select('id, full_name, email')
+      .order('full_name');
+    setTeamUsers(data || []);
+  };
 
   const loadInstitutions = async () => {
     const { data } = await supabase
@@ -181,11 +205,29 @@ export const ContactForm = ({ contact, onClose, onSuccess }) => {
         geographic_scope: formData.geographic_scope || null,
         annual_cases: formData.annual_cases ? parseInt(formData.annual_cases) : null,
         uses_ai_pathology: formData.uses_ai_pathology,
-        interest_level: formData.interest_level,
+        // Pipeline comercial
+        stage: formData.stage,
+        priority: formData.priority,
+        assigned_to: formData.assigned_to || null,
+        next_followup_at: formData.next_followup_at
+          ? new Date(formData.next_followup_at).toISOString()
+          : null,
+        specialty: formData.specialty.trim() || null,
+        society: formData.society.trim() || null,
+        is_kol: formData.is_kol,
         source: formData.source.trim() || null,
         tags: formData.tags.length > 0 ? formData.tags : null,
         ai_context: formData.ai_context.trim() || null
       };
+
+      // Si la etapa cambió, dejamos registro: es la única fuente de la
+      // conversión por etapa del cierre mensual.
+      const stageChanged = isEditing && contact.stage !== formData.stage;
+      if (stageChanged) {
+        dataToSave.stage_changed_at = new Date().toISOString();
+      } else if (!isEditing) {
+        dataToSave.stage_changed_at = new Date().toISOString();
+      }
 
       if (isEditing) {
         const { error } = await supabase
@@ -193,6 +235,18 @@ export const ContactForm = ({ contact, onClose, onSuccess }) => {
           .update(dataToSave)
           .eq('id', contact.id);
         if (error) throw error;
+
+        if (stageChanged) {
+          const { data: { user } } = await supabase.auth.getUser();
+          const { error: histErr } = await supabase.from('contact_stage_changes').insert({
+            contact_id: contact.id,
+            from_stage: contact.stage || null,
+            to_stage: formData.stage,
+            changed_by: user?.id || null,
+          });
+          // El historial es complementario: si falla, no revertimos el cambio.
+          if (histErr) console.warn('No se pudo registrar el cambio de etapa:', histErr.message);
+        }
       } else {
         const { error } = await supabase
           .from('contacts')
@@ -537,28 +591,133 @@ export const ContactForm = ({ contact, onClose, onSuccess }) => {
                 </div>
               </div>
 
-              {/* === CLASIFICACIÓN CRM === */}
+              {/* === PIPELINE COMERCIAL === */}
               <div>
                 <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
-                  Clasificación CRM
+                  Pipeline comercial
                 </h3>
                 <div className="grid grid-cols-2 gap-4">
-                  {/* Nivel de Interés */}
+                  {/* Etapa */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Nivel de Interés
+                      Etapa
                     </label>
                     <select
-                      value={formData.interest_level}
-                      onChange={(e) => handleChange('interest_level', e.target.value)}
+                      value={formData.stage}
+                      onChange={(e) => handleChange('stage', e.target.value)}
                       className="input appearance-none"
                     >
-                      {INTEREST_OPTIONS.map(level => (
-                        <option key={level.value} value={level.value}>{level.label}</option>
+                      {Object.values(PIPELINE_STAGES).map(s => (
+                        <option key={s.value} value={s.value}>{s.label}</option>
                       ))}
                     </select>
                   </div>
 
+                  {/* Prioridad */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Prioridad
+                    </label>
+                    <select
+                      value={formData.priority}
+                      onChange={(e) => handleChange('priority', e.target.value)}
+                      className="input appearance-none"
+                    >
+                      {Object.values(PRIORITY_LEVELS).map(p => (
+                        <option key={p.value} value={p.value}>{p.label}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Responsable */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Responsable
+                    </label>
+                    <select
+                      value={formData.assigned_to || ''}
+                      onChange={(e) => handleChange('assigned_to', e.target.value)}
+                      className="input appearance-none"
+                    >
+                      <option value="">Sin asignar</option>
+                      {teamUsers.map(u => (
+                        <option key={u.id} value={u.id}>{u.full_name || u.email}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Próximo seguimiento */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Próximo seguimiento
+                    </label>
+                    <input
+                      type="date"
+                      value={formData.next_followup_at}
+                      onChange={(e) => handleChange('next_followup_at', e.target.value)}
+                      className="input"
+                    />
+                  </div>
+
+                  {/* Especialidad */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Especialidad
+                    </label>
+                    <input
+                      list="specialties-list"
+                      type="text"
+                      value={formData.specialty}
+                      onChange={(e) => handleChange('specialty', e.target.value)}
+                      className="input"
+                      placeholder="Anatomía Patológica"
+                    />
+                    <datalist id="specialties-list">
+                      {SPECIALTIES.map(s => <option key={s} value={s} />)}
+                    </datalist>
+                  </div>
+
+                  {/* Sociedad */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Sociedad científica
+                    </label>
+                    <input
+                      list="societies-list"
+                      type="text"
+                      value={formData.society}
+                      onChange={(e) => handleChange('society', e.target.value)}
+                      className="input"
+                      placeholder="SAPYCC"
+                    />
+                    <datalist id="societies-list">
+                      {SOCIETIES.map(s => <option key={s} value={s} />)}
+                    </datalist>
+                  </div>
+
+                  {/* KOL */}
+                  <div className="col-span-2">
+                    <label className="flex items-center gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={formData.is_kol}
+                        onChange={(e) => handleChange('is_kol', e.target.checked)}
+                        className="w-4 h-4 rounded border-gray-300 text-primary-500"
+                      />
+                      <span className="text-sm font-medium text-gray-700">
+                        Es KOL (líder de opinión)
+                      </span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              {/* === CLASIFICACIÓN === */}
+              <div>
+                <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
+                  Clasificación
+                </h3>
+                <div className="grid grid-cols-2 gap-4">
                   {/* Fuente */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">

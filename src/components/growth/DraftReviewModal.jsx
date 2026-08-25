@@ -157,7 +157,8 @@ export const DraftReviewModal = ({ draft, onClose, onApprove, onReject, onViewLe
             last_name: lead.last_name || lead.full_name?.split(' ').slice(1).join(' ') || '',
             email: lead.email || '',
             job_title: lead.job_title || '',
-            interest_level: 'cold',
+            stage: 'new',
+            priority: 'media',
             role: 'other',
             source: `growth_system_${lead.vertical}`,
             ai_context: [

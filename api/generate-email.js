@@ -144,6 +144,23 @@ ${projectSection}`;
 // ---------------------------------------------------------------------------
 // User prompt builder (mirrored from src/config/aiPrompts.js)
 // ---------------------------------------------------------------------------
+// Etiquetas del pipeline comercial. Duplicadas de src/config/aiPrompts.js
+// porque las funciones de api/ no pueden importar desde src/.
+const STAGE_LABELS = {
+  new: 'Nuevo (sin contactar)',
+  contacted: 'Contactado',
+  qualified: 'Calificado (mostró interés)',
+  customer: 'Cliente activo',
+  lost: 'Perdido',
+};
+
+const PRIORITY_LABELS = {
+  muy_alta: 'Muy alta',
+  alta: 'Alta',
+  media: 'Media',
+  baja: 'Baja',
+};
+
 const ROLE_MAP = {
   'pathologist': 'Patólogo/a',
   'researcher': 'Investigador/a',
@@ -184,7 +201,8 @@ function buildEmailGenerationPrompt(contact, lastInteractions, emailType, projec
 **Cargo:** ${contact.job_title || 'No especificado'}
 **Institución:** ${contact.institution?.name || 'No especificada'}
 **Rol en CRM:** ${ROLE_MAP[contact.role] || contact.role}
-**Nivel de interés:** ${contact.interest_level}
+**Etapa comercial:** ${STAGE_LABELS[contact.stage] || 'Nuevo'}
+**Prioridad:** ${PRIORITY_LABELS[contact.priority] || 'Media'}${contact.specialty ? `\n**Especialidad:** ${contact.specialty}` : ''}${contact.is_kol ? '\n**Es KOL (líder de opinión)**' : ''}
 
 **Contexto adicional (importante para personalizar):**
 ${contact.ai_context || 'No hay contexto adicional.'}
