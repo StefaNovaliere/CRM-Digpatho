@@ -28,7 +28,10 @@ const CRM_FIELDS = [
   { key: 'role', label: 'Rol', required: false },
   { key: 'job_title', label: 'Cargo', required: false },
   { key: 'linkedin_url', label: 'LinkedIn', required: false },
-  { key: 'interest_level', label: 'Nivel de Interés', required: false },
+  { key: 'stage', label: 'Etapa', required: false },
+  { key: 'priority', label: 'Prioridad', required: false },
+  { key: 'specialty', label: 'Especialidad', required: false },
+  { key: 'society', label: 'Sociedad científica', required: false },
   { key: 'source', label: 'Fuente', required: false },
   { key: 'ai_context', label: 'Notas / Contexto IA', required: false },
 ];
@@ -61,19 +64,37 @@ const ROLE_MAPPING = {
   'staff': 'pathologist',
 };
 
-// Mapeo de niveles de interés
-const INTEREST_MAPPING = {
-  'frío': 'cold',
-  'frio': 'cold',
-  'cold': 'cold',
-  'tibio': 'warm',
-  'warm': 'warm',
-  'caliente': 'hot',
-  'hot': 'hot',
+// Mapeo de prioridades del Excel a los valores del CRM.
+// Reemplaza al viejo mapeo de niveles de interés (frío/tibio/caliente), que
+// se jubiló en la migración 009.
+const PRIORITY_MAPPING = {
+  'muy alta': 'muy_alta',
+  'muy_alta': 'muy_alta',
+  'muyalta': 'muy_alta',
+  'critica': 'muy_alta',
+  'crítica': 'muy_alta',
+  'alta': 'alta',
+  'high': 'alta',
+  'media': 'media',
+  'medium': 'media',
+  'normal': 'media',
+  'baja': 'baja',
+  'low': 'baja',
+};
+
+// Mapeo de etapas del pipeline
+const STAGE_MAPPING = {
+  'nuevo': 'new',
+  'new': 'new',
+  'contactado': 'contacted',
+  'contacted': 'contacted',
+  'calificado': 'qualified',
+  'qualified': 'qualified',
   'cliente': 'customer',
   'customer': 'customer',
-  'ex-cliente': 'churned',
-  'churned': 'churned',
+  'perdido': 'lost',
+  'lost': 'lost',
+  'descartado': 'lost',
 };
 
 // ========================================
@@ -168,7 +189,10 @@ export const ImportContactsModal = ({ isOpen, onClose, onSuccess }) => {
       'role': ['rol', 'role', 'tipo'],
       'job_title': ['cargo', 'puesto', 'job title', 'position', 'título'],
       'linkedin_url': ['linkedin', 'linkedin url'],
-      'interest_level': ['interés', 'interes', 'interest', 'nivel'],
+      'stage': ['etapa', 'stage', 'estado', 'status'],
+      'priority': ['prioridad', 'priority', 'interés', 'interes', 'nivel'],
+      'specialty': ['especialidad', 'specialty', 'area', 'área'],
+      'society': ['sociedad', 'society', 'asociación', 'asociacion'],
       'source': ['fuente', 'source', 'origen', 'canal'],
       'ai_context': ['notas', 'notes', 'contexto', 'perfil', 'comentarios', 'observaciones'],
     };
@@ -234,8 +258,10 @@ export const ImportContactsModal = ({ isOpen, onClose, onSuccess }) => {
         // Transformaciones especiales
         if (field.key === 'role') {
           value = normalizeRole(value);
-        } else if (field.key === 'interest_level') {
-          value = normalizeInterestLevel(value);
+        } else if (field.key === 'priority') {
+          value = normalizePriority(value);
+        } else if (field.key === 'stage') {
+          value = normalizeStage(value);
         }
 
         contact[field.key] = value;
@@ -285,14 +311,21 @@ export const ImportContactsModal = ({ isOpen, onClose, onSuccess }) => {
   };
 
   // Normalizar nivel de interés
-  const normalizeInterestLevel = (value) => {
-    const lower = value.toLowerCase();
-    for (const [keyword, level] of Object.entries(INTEREST_MAPPING)) {
-      if (lower.includes(keyword)) {
-        return level;
-      }
+  const normalizePriority = (value) => {
+    const lower = String(value).toLowerCase().trim();
+    // 'muy alta' antes que 'alta': si no, 'alta' matchea primero y pierde el matiz.
+    for (const [keyword, level] of Object.entries(PRIORITY_MAPPING)) {
+      if (lower.includes(keyword)) return level;
     }
-    return 'cold'; // Default
+    return 'media';
+  };
+
+  const normalizeStage = (value) => {
+    const lower = String(value).toLowerCase().trim();
+    for (const [keyword, stage] of Object.entries(STAGE_MAPPING)) {
+      if (lower.includes(keyword)) return stage;
+    }
+    return 'new';
   };
 
   // ========================================
@@ -349,7 +382,10 @@ export const ImportContactsModal = ({ isOpen, onClose, onSuccess }) => {
           institution_id: institution_name ? institutionMap[institution_name] : null,
           role: rest.role || 'other',
           job_title: rest.job_title || null,
-          interest_level: rest.interest_level || 'cold',
+          stage: rest.stage || 'new',
+          priority: rest.priority || 'media',
+          specialty: rest.specialty || null,
+          society: rest.society || null,
           source: rest.source || 'Importación Excel',
           ai_context: rest.ai_context || null,
         };
