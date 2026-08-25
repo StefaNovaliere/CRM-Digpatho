@@ -29,6 +29,7 @@ import {
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../hooks/useAuth';
 import { GROWTH_VERTICALS } from '../../config/constants';
+import { copyToClipboard } from '../../utils/clipboard';
 
 const verticalColors = {
   DIRECT_B2B: 'from-blue-500 to-cyan-500',
@@ -156,7 +157,8 @@ export const DraftReviewModal = ({ draft, onClose, onApprove, onReject, onViewLe
             last_name: lead.last_name || lead.full_name?.split(' ').slice(1).join(' ') || '',
             email: lead.email || '',
             job_title: lead.job_title || '',
-            interest_level: 'cold',
+            stage: 'new',
+            priority: 'media',
             role: 'other',
             source: `growth_system_${lead.vertical}`,
             ai_context: [
@@ -235,12 +237,11 @@ export const DraftReviewModal = ({ draft, onClose, onApprove, onReject, onViewLe
     onReject(draft.id, notes);
   };
 
-  const handleCopy = () => {
+  const handleCopy = async () => {
     const subject = isEditing ? editSubject : draft.subject;
     const body = isEditing ? editBody : draft.body;
-    navigator.clipboard.writeText(
-      `Asunto: ${subject}\n\n${body}`
-    );
+    const ok = await copyToClipboard(`Asunto: ${subject}\n\n${body}`);
+    if (!ok) return;
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
