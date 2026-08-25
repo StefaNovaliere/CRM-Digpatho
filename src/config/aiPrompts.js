@@ -1,6 +1,24 @@
 // src/config/aiPrompts.js
 // System Prompts para el Agente de Email de Digpatho IA
 
+// Etiquetas del pipeline para los prompts. Se duplican en vez de importarse
+// de constants.js porque api/generate-email.js —que arma el mismo prompt del
+// lado del servidor— no puede importar desde src/.
+const STAGE_LABELS = {
+  new: 'Nuevo (sin contactar)',
+  contacted: 'Contactado',
+  qualified: 'Calificado (mostró interés)',
+  customer: 'Cliente activo',
+  lost: 'Perdido',
+};
+
+const PRIORITY_LABELS = {
+  muy_alta: 'Muy alta',
+  alta: 'Alta',
+  media: 'Media',
+  baja: 'Baja',
+};
+
 // ========================================
 // PROYECTOS / MODELOS DISPONIBLES
 // ========================================
@@ -210,7 +228,8 @@ export const buildEmailGenerationPrompt = (contact, lastInteractions, emailType 
 **Cargo:** ${contact.job_title || 'No especificado'}
 **Institución:** ${contact.institution?.name || 'No especificada'}
 **Rol en CRM:** ${formatRole(contact.role)}
-**Nivel de interés:** ${contact.interest_level}
+**Etapa comercial:** ${STAGE_LABELS[contact.stage] || 'Nuevo'}
+**Prioridad:** ${PRIORITY_LABELS[contact.priority] || 'Media'}${contact.specialty ? `\n**Especialidad:** ${contact.specialty}` : ''}${contact.is_kol ? '\n**Es KOL (líder de opinión)**' : ''}
 
 **Contexto adicional (importante para personalizar):**
 ${contact.ai_context || 'No hay contexto adicional.'}
