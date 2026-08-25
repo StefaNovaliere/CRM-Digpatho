@@ -1,41 +1,120 @@
 // src/config/constants.js
+//
+// Fuente única de los enums del CRM. Importar SIEMPRE desde acá: hasta la
+// migración 009 cada componente hardcodeaba su propia copia (ContactForm,
+// ContactCard, ContactDetail, Contacts, ImportContactsModal...), y eso las
+// desincronizaba entre sí.
+//
+// NOTA: los niveles de interés (frío/tibio/caliente) se jubilaron en la 009.
+// Los reemplazan PIPELINE_STAGES (dónde está en el proceso) y PRIORITY_LEVELS
+// (cuánto nos importa), que son ejes distintos. La columna interest_level
+// sigue en la base, sin uso, por si hay que volver atrás.
 
-// Niveles de interés
-export const INTEREST_LEVELS = {
-  cold: {
-    value: 'cold',
-    label: 'Frío',
-    emoji: '❄️',
+// ============================
+// Pipeline comercial
+// ============================
+
+// Etapa: en qué punto de NUESTRO proceso está el contacto.
+export const PIPELINE_STAGES = {
+  new: {
+    value: 'new',
+    label: 'Nuevo',
     color: 'slate',
-    description: 'Sin interés demostrado'
+    description: 'Sin contactar todavía'
   },
-  warm: {
-    value: 'warm',
-    label: 'Tibio',
-    emoji: '🌤️',
-    color: 'amber',
-    description: 'Algo de interés'
+  contacted: {
+    value: 'contacted',
+    label: 'Contactado',
+    color: 'blue',
+    description: 'Ya hubo un primer contacto'
   },
-  hot: {
-    value: 'hot',
-    label: 'Caliente',
-    emoji: '🔥',
-    color: 'orange',
-    description: 'Muy interesado, listo para cerrar'
+  qualified: {
+    value: 'qualified',
+    label: 'Calificado',
+    color: 'violet',
+    description: 'Mostró interés concreto'
   },
   customer: {
     value: 'customer',
-    label: 'Cliente',
-    emoji: '✅',
+    label: 'Cliente activo',
     color: 'green',
     description: 'Ya es cliente'
   },
-  churned: {
-    value: 'churned',
-    label: 'Ex-cliente',
-    emoji: '⚠️',
+  lost: {
+    value: 'lost',
+    label: 'Perdido',
     color: 'red',
-    description: 'Dejó de ser cliente'
+    description: 'Descartado o sin interés'
+  }
+};
+
+// Orden del embudo, para gráficos y reportes de conversión.
+export const PIPELINE_STAGE_ORDER = ['new', 'contacted', 'qualified', 'customer', 'lost'];
+
+// Prioridad: cuánto nos importa este contacto. Independiente de la etapa.
+export const PRIORITY_LEVELS = {
+  muy_alta: { value: 'muy_alta', label: 'Muy alta', color: 'red', weight: 4 },
+  alta:     { value: 'alta',     label: 'Alta',     color: 'orange', weight: 3 },
+  media:    { value: 'media',    label: 'Media',    color: 'amber', weight: 2 },
+  baja:     { value: 'baja',     label: 'Baja',     color: 'slate', weight: 1 }
+};
+
+// Especialidades médicas. Lista sugerida para el selector; el campo es texto
+// libre en la base, así que se puede cargar cualquier otra.
+export const SPECIALTIES = [
+  'Anatomía Patológica',
+  'Oncología',
+  'Mastología',
+  'Gineco-oncología',
+  'Urología',
+  'Hematología',
+  'Cirugía',
+  'Radiología',
+  'Otra'
+];
+
+// Sociedades científicas. También texto libre en la base.
+export const SOCIETIES = [
+  'SPMCBA',
+  'SAM',
+  'AAOC',
+  'SAPYCC',
+  'SAU',
+  'Otra'
+];
+
+// Rol de la persona dentro del equipo comercial (user_profiles.crm_role).
+// No es un control de permisos: define qué rutina y qué metas le corresponden.
+export const CRM_ROLES = {
+  telefonista: {
+    value: 'telefonista',
+    label: 'Telefonista',
+    description: 'Primer contacto, calificación y enriquecimiento de datos'
+  },
+  vendedor: {
+    value: 'vendedor',
+    label: 'Vendedor',
+    description: 'Seguimiento profundo, reuniones y cierre'
+  },
+  admin: {
+    value: 'admin',
+    label: 'Administrador',
+    description: 'Configura equipos, metas y asignación de cartera'
+  }
+};
+
+// Metas diarias por rol (valores por defecto del Manual de Rutinas
+// Comerciales). Son el fallback: si hay valores cargados en Settings, mandan
+// esos.
+export const DEFAULT_DAILY_GOALS = {
+  telefonista: {
+    contactos_trabajados: 28,
+    primeros_contactos: 9,
+    traspasos: 4
+  },
+  vendedor: {
+    seguimientos: 12,
+    reuniones: 3
   }
 };
 
