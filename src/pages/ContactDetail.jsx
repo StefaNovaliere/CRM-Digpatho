@@ -24,17 +24,22 @@ import {
   Zap,
   RefreshCw,
   Target,
-  ChevronUp
+  ChevronUp,
+  Star,
+  CalendarClock,
+  UserCheck
 } from 'lucide-react';
 import { formatDistanceToNow, format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { supabase } from '../lib/supabase';
+import { StatusBadge } from '../components/common/StatusBadge';
 import { useEmailGeneration } from '../hooks/useEmailGeneration';
 import { useGmail } from '../hooks/useGmail';
 import { EmailDraftModal } from '../components/email/EmailDraftModal';
 import { ContactForm } from '../components/contacts/ContactForm';
 import { AddInteractionModal } from '../components/interactions/AddInteractionModal';
 import { PROJECT_OPTIONS } from '../config/aiPrompts';
+import { PageContainer } from '../components/common/PageContainer';
 
 // ========================================
 // CONFIGURACIÓN
@@ -57,26 +62,6 @@ const EMAIL_TYPE_OPTIONS = [
   { value: 'post-meeting', label: 'Post-reunión', description: 'Resumen después de una reunión' },
   { value: 'reactivation', label: 'Reactivación', description: 'Retomar contacto inactivo' },
 ];
-
-// ========================================
-// INTEREST BADGE
-// ========================================
-const InterestBadge = ({ level }) => {
-  const config = {
-    cold: { label: 'Frío', emoji: '❄️', bg: 'bg-slate-100', text: 'text-slate-700' },
-    warm: { label: 'Tibio', emoji: '🌤️', bg: 'bg-amber-100', text: 'text-amber-700' },
-    hot: { label: 'Caliente', emoji: '🔥', bg: 'bg-orange-100', text: 'text-orange-700' },
-    customer: { label: 'Cliente', emoji: '✅', bg: 'bg-emerald-100', text: 'text-emerald-700' },
-    churned: { label: 'Ex-cliente', emoji: '⚠️', bg: 'bg-red-100', text: 'text-red-700' }
-  };
-  const { label, emoji, bg, text } = config[level] || config.cold;
-  return (
-    <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium ${bg} ${text}`}>
-      <span>{emoji}</span>
-      {label}
-    </span>
-  );
-};
 
 // ========================================
 // TIMELINE ITEM
@@ -144,6 +129,7 @@ export const ContactDetail = () => {
   const { checkContactReplies, syncing } = useGmail();
 
   const [contact, setContact] = useState(null);
+  const [assignedUser, setAssignedUser] = useState(null);
   const [interactions, setInteractions] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -188,6 +174,19 @@ export const ContactDetail = () => {
     }
     setContact(data);
     setLoading(false);
+
+    // El responsable se busca aparte: assigned_to apunta a auth.users, no hay
+    // FK declarada hacia user_profiles, así que Supabase no puede joinearlo.
+    if (data?.assigned_to) {
+      const { data: u } = await supabase
+        .from('user_profiles')
+        .select('id, full_name, email')
+        .eq('id', data.assigned_to)
+        .maybeSingle();
+      setAssignedUser(u || null);
+    } else {
+      setAssignedUser(null);
+    }
   };
 
   const loadInteractions = async () => {
@@ -232,7 +231,7 @@ export const ContactDetail = () => {
   const selectedProject = PROJECT_OPTIONS.find(p => p.value === emailConfig.project);
 
   return (
-    <div className="max-w-5xl mx-auto animate-fade-in">
+    <PageContainer width="medium" gap="none">
       {/* Back Button */}
       <Link
         to="/contacts"
@@ -256,9 +255,22 @@ export const ContactDetail = () => {
                   <h1 className="text-2xl font-bold text-gray-900">
                     {contact.first_name} {contact.last_name}
                   </h1>
-                  <p className="text-gray-500">{contact.job_title || 'Sin cargo'}</p>
-                  <div className="flex items-center gap-2 mt-2">
-                    <InterestBadge level={contact.interest_level} />
+                  <p className="text-gray-500">
+                    {contact.job_title || contact.specialty || 'Sin cargo'}
+                  </p>
+                  <div className="flex items-center gap-2 mt-2 flex-wrap">
+                    <StatusBadge status={contact.stage} variant="stage" />
+                    <StatusBadge status={contact.priority} variant="priority" />
+                    {contact.is_kol && (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-violet-100 text-violet-700">
+                        <Star size={12} /> KOL
+                      </span>
+                    )}
+                    {contact.society && (
+                      <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-sky-50 text-sky-700">
+                        {contact.society}
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -573,6 +585,43 @@ export const ContactDetail = () => {
             </div>
           </div>
 
+          {/* Pipeline comercial */}
+          <div className="card p-5">
+            <h3 className="font-semibold text-gray-900 mb-4">Pipeline comercial</h3>
+            <div className="space-y-3 text-sm">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-gray-600 flex items-center gap-1.5">
+                  <UserCheck size={14} className="text-gray-400" />
+                  Responsable
+                </span>
+                <span className="font-semibold text-right">
+                  {assignedUser?.full_name || assignedUser?.email || 'Sin asignar'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-gray-600 flex items-center gap-1.5">
+                  <CalendarClock size={14} className="text-gray-400" />
+                  Próximo seguimiento
+                </span>
+                <span className={`font-semibold text-right ${
+                  contact.next_followup_at && new Date(contact.next_followup_at) < new Date()
+                    ? 'text-red-600'
+                    : ''
+                }`}>
+                  {contact.next_followup_at
+                    ? format(new Date(contact.next_followup_at), "d 'de' MMMM, yyyy", { locale: es })
+                    : 'Sin agendar'}
+                </span>
+              </div>
+              {contact.specialty && (
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-gray-600">Especialidad</span>
+                  <span className="font-semibold text-right">{contact.specialty}</span>
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* Quick Stats */}
           <div className="card p-5">
             <h3 className="font-semibold text-gray-900 mb-4">Estadísticas</h3>
@@ -634,7 +683,7 @@ export const ContactDetail = () => {
           }}
         />
       )}
-    </div>
+    </PageContainer>
   );
 };
 
