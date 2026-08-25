@@ -1,10 +1,8 @@
 // src/pages/BulkEmail.jsx
 import { useState, useEffect } from 'react';
 import {
-  Send,
   Upload,
   Play,
-  Pause,
   Trash2,
   Eye,
   CheckCircle,
@@ -15,7 +13,6 @@ import {
   RefreshCw,
   Mail,
   Users,
-  AlertCircle,
   Paperclip,
   User
 } from 'lucide-react';
@@ -24,29 +21,10 @@ import { useAuth } from '../hooks/useAuth';
 import { BulkEmailImportModal } from '../components/bulk-email/BulkEmailImportModal';
 import { BulkEmailQueueModal } from '../components/bulk-email/BulkEmailQueueModal';
 import { BulkEmailSender } from '../components/bulk-email/BulkEmailSender';
+import { StatusBadge } from '../components/common/StatusBadge';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
-
-// Status badges
-const StatusBadge = ({ status }) => {
-  const config = {
-    draft: { label: 'Borrador', color: 'bg-gray-100 text-gray-700', icon: Clock },
-    ready: { label: 'Listo', color: 'bg-blue-100 text-blue-700', icon: CheckCircle },
-    sending: { label: 'Enviando...', color: 'bg-amber-100 text-amber-700', icon: RefreshCw },
-    completed: { label: 'Completado', color: 'bg-green-100 text-green-700', icon: CheckCircle },
-    paused: { label: 'Pausado', color: 'bg-orange-100 text-orange-700', icon: Pause },
-    failed: { label: 'Error', color: 'bg-red-100 text-red-700', icon: XCircle },
-  };
-
-  const { label, color, icon: Icon } = config[status] || config.draft;
-
-  return (
-    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full ${color}`}>
-      <Icon size={12} className={status === 'sending' ? 'animate-spin' : ''} />
-      {label}
-    </span>
-  );
-};
+import { PageContainer } from '../components/common/PageContainer';
 
 export const BulkEmail = () => {
   const { user } = useAuth();
@@ -154,7 +132,7 @@ export const BulkEmail = () => {
   };
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
+    <PageContainer gap="none">
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
@@ -274,7 +252,7 @@ export const BulkEmail = () => {
                   <div className="flex-1">
                     <div className="flex items-center gap-3">
                       <h3 className="font-medium text-gray-900">{campaign.name}</h3>
-                      <StatusBadge status={campaign.status} />
+                      <StatusBadge status={campaign.status} variant="campaign" />
                     </div>
                     <div className="flex items-center gap-4 mt-1 text-sm text-gray-500">
                       <span className="flex items-center gap-1">
@@ -440,7 +418,7 @@ export const BulkEmail = () => {
           }}
         />
       )}
-    </div>
+    </PageContainer>
   );
 };
 

@@ -12,7 +12,6 @@ import {
   Download,
   RefreshCw,
   CheckCircle,
-  XCircle,
   AlertCircle,
   Mail,
   Building2,
@@ -30,6 +29,8 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { supabase } from '../../lib/supabase';
+import { StatusBadge } from '../common/StatusBadge';
+import { copyToClipboard } from '../../utils/clipboard';
 import { GROWTH_VERTICALS } from '../../config/constants';
 
 const INPUT_MODES = {
@@ -145,22 +146,6 @@ function exportResultsToExcel(results) {
   const filename = `vertex_emails_${new Date().toISOString().slice(0, 10)}.xlsx`;
   XLSX.writeFile(workbook, filename);
 }
-
-const StatusBadge = ({ status }) => {
-  const config = {
-    found: { label: 'Encontrado', color: 'bg-green-100 text-green-700', Icon: CheckCircle },
-    not_found: { label: 'No encontrado', color: 'bg-gray-100 text-gray-500', Icon: XCircle },
-    error: { label: 'Error', color: 'bg-red-100 text-red-700', Icon: AlertCircle },
-  }[status] || { label: status, color: 'bg-gray-100 text-gray-500', Icon: AlertCircle };
-
-  const { label, color, Icon } = config;
-  return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full ${color}`}>
-      <Icon size={12} />
-      {label}
-    </span>
-  );
-};
 
 export const BulkEmailSearch = () => {
   const [mode, setMode] = useState(INPUT_MODES.MANUAL);
@@ -278,8 +263,9 @@ export const BulkEmailSearch = () => {
     setSaveResult(null);
   };
 
-  const handleCopyEmail = (email) => {
-    navigator.clipboard.writeText(email);
+  const handleCopyEmail = async (email) => {
+    const ok = await copyToClipboard(email);
+    if (!ok) return; // no marcamos como copiado si falló
     setCopiedEmail(email);
     setTimeout(() => setCopiedEmail(null), 1500);
   };
@@ -591,7 +577,7 @@ export const BulkEmailSearch = () => {
                         <span className="font-medium text-gray-900 truncate">
                           {r.input.first_name} {r.input.last_name}
                         </span>
-                        <StatusBadge status={r.status} />
+                        <StatusBadge status={r.status} variant="search" size="sm" />
                         {r.confidence && r.status === 'found' && (
                           <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
                             r.confidence === 'high' ? 'bg-green-50 text-green-600' :

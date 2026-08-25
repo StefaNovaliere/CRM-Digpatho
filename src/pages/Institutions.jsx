@@ -12,6 +12,7 @@ import {
   X
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { PageContainer } from '../components/common/PageContainer';
 
 // Institution Form Modal
 const InstitutionForm = ({ institution, onClose, onSuccess }) => {
@@ -313,7 +314,7 @@ export const Institutions = () => {
   }
 
   return (
-    <div className="space-y-6">
+    <PageContainer>
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Instituciones</h1>
@@ -365,7 +366,7 @@ export const Institutions = () => {
           onSuccess={() => { setShowForm(false); setEditingInstitution(null); window.location.reload(); }}
         />
       )}
-    </div>
+    </PageContainer>
   );
 };
 

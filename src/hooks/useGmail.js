@@ -2,6 +2,7 @@
 import { useState, useCallback } from 'react';
 import { useAuth } from './useAuth';
 import { supabase } from '../lib/supabase';
+import { copyToClipboard as copyText } from '../utils/clipboard';
 
 // Google OAuth Token Endpoint
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -412,16 +413,11 @@ export const useGmail = () => {
   /**
    * Copia el email al portapapeles
    */
+  // Mantiene la firma pública del hook; la mecánica de copiado vive en
+  // utils/clipboard, que además tiene fallback para contextos no seguros.
   const copyToClipboard = async ({ subject, body }) => {
     const signature = profile?.email_signature ? `\n\n--\n${profile.email_signature}` : '';
-    const fullText = `Asunto: ${subject}\n\n${body}${signature}`;
-    try {
-      await navigator.clipboard.writeText(fullText);
-      return true;
-    } catch (err) {
-      console.error('Error copying to clipboard:', err);
-      return false;
-    }
+    return copyText(`Asunto: ${subject}\n\n${body}${signature}`);
   };
 
   return {

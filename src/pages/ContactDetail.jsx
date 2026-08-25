@@ -35,6 +35,7 @@ import { EmailDraftModal } from '../components/email/EmailDraftModal';
 import { ContactForm } from '../components/contacts/ContactForm';
 import { AddInteractionModal } from '../components/interactions/AddInteractionModal';
 import { PROJECT_OPTIONS } from '../config/aiPrompts';
+import { PageContainer } from '../components/common/PageContainer';
 
 // ========================================
 // CONFIGURACIÓN
@@ -232,7 +233,7 @@ export const ContactDetail = () => {
   const selectedProject = PROJECT_OPTIONS.find(p => p.value === emailConfig.project);
 
   return (
-    <div className="max-w-5xl mx-auto animate-fade-in">
+    <PageContainer width="medium" gap="none">
       {/* Back Button */}
       <Link
         to="/contacts"
@@ -634,7 +635,7 @@ export const ContactDetail = () => {
           }}
         />
       )}
-    </div>
+    </PageContainer>
   );
 };
 

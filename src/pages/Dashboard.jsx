@@ -22,6 +22,7 @@ import {
 import { supabase } from '../lib/supabase';
 import { formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
+import { PageContainer } from '../components/common/PageContainer';
 
 // ========================================
 // SENT EMAILS MODAL COMPONENT (NUEVO)
@@ -402,7 +403,7 @@ export const Dashboard = () => {
   }
 
   return (
-    <div className="space-y-8 animate-fade-in">
+    <PageContainer gap="lg">
       {/* Modal de Emails Enviados */}
       <SentEmailsModal
         isOpen={isEmailHistoryOpen}
@@ -583,7 +584,7 @@ export const Dashboard = () => {
           </div>
         </div>
       </div>
-    </div>
+    </PageContainer>
   );
 };
 

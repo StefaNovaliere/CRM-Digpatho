@@ -9,6 +9,7 @@ import {
   Info,
   AlertTriangle
 } from 'lucide-react';
+import { PageContainer } from '../components/common/PageContainer';
 
 export const Settings = () => {
   const [loading, setLoading] = useState(false);
@@ -30,7 +31,7 @@ export const Settings = () => {
   };
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6 animate-fade-in">
+    <PageContainer width="narrow">
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Configuración</h1>
@@ -224,7 +225,7 @@ export const Settings = () => {
           )}
         </button>
       </div>
-    </div>
+    </PageContainer>
   );
 };
 

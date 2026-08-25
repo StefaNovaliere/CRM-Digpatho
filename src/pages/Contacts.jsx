@@ -20,6 +20,7 @@ import { supabase } from '../lib/supabase';
 import { ContactCard } from '../components/contacts/ContactCard';
 import { ContactForm } from '../components/contacts/ContactForm';
 import { ImportContactsModal } from '../components/contacts/ImportContactsModal';
+import { PageContainer } from '../components/common/PageContainer';
 
 export const Contacts = () => {
   const navigate = useNavigate();
@@ -195,7 +196,7 @@ export const Contacts = () => {
   }
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <PageContainer>
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -401,7 +402,7 @@ export const Contacts = () => {
         onClose={() => setShowImportModal(false)}
         onSuccess={handleImportSuccess}
       />
-    </div>
+    </PageContainer>
   );
 };
 
