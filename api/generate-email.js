@@ -144,6 +144,23 @@ ${projectSection}`;
 // ---------------------------------------------------------------------------
 // User prompt builder (mirrored from src/config/aiPrompts.js)
 // ---------------------------------------------------------------------------
+// Etiquetas del pipeline comercial. Duplicadas de src/config/aiPrompts.js
+// porque las funciones de api/ no pueden importar desde src/.
+const STAGE_LABELS = {
+  new: 'Nuevo (sin contactar)',
+  contacted: 'Contactado',
+  qualified: 'Calificado (mostró interés)',
+  customer: 'Cliente activo',
+  lost: 'Perdido',
+};
+
+const PRIORITY_LABELS = {
+  muy_alta: 'Muy alta',
+  alta: 'Alta',
+  media: 'Media',
+  baja: 'Baja',
+};
+
 const ROLE_MAP = {
   'pathologist': 'Patólogo/a',
   'researcher': 'Investigador/a',
@@ -184,7 +201,8 @@ function buildEmailGenerationPrompt(contact, lastInteractions, emailType, projec
 **Cargo:** ${contact.job_title || 'No especificado'}
 **Institución:** ${contact.institution?.name || 'No especificada'}
 **Rol en CRM:** ${ROLE_MAP[contact.role] || contact.role}
-**Nivel de interés:** ${contact.interest_level}
+**Etapa comercial:** ${STAGE_LABELS[contact.stage] || 'Nuevo'}
+**Prioridad:** ${PRIORITY_LABELS[contact.priority] || 'Media'}${contact.specialty ? `\n**Especialidad:** ${contact.specialty}` : ''}${contact.is_kol ? '\n**Es KOL (líder de opinión)**' : ''}
 
 **Contexto adicional (importante para personalizar):**
 ${contact.ai_context || 'No hay contexto adicional.'}
@@ -428,10 +446,24 @@ export default async function handler(req, res) {
       .select()
       .single();
 
-    if (draftError) console.error('Error saving draft:', draftError);
+    // Si el borrador no se persiste, el id queda undefined y el envío posterior
+    // NO se registra en `interactions` (useGmail sólo registra si hay draftId).
+    // Antes esto se silenciaba: el usuario veía "éxito" y el envío desaparecía.
+    // Causa habitual: falta SUPABASE_SERVICE_KEY y el insert con anon key lo
+    // bloquea RLS. Lo devolvemos en la respuesta para que sea visible.
+    if (draftError) {
+      console.error(
+        '[generate-email] No se pudo guardar el borrador en email_drafts. ' +
+        'El envío no quedará registrado en el historial. ' +
+        'Verificá SUPABASE_SERVICE_KEY en las variables de entorno. Detalle:',
+        draftError
+      );
+    }
 
     return res.status(200).json({
       success: true,
+      draft_persisted: !draftError && !!draft?.id,
+      draft_error: draftError ? (draftError.message || 'No se pudo guardar el borrador') : null,
       result: {
         id: draft?.id,
         subject: parsed.subject,
