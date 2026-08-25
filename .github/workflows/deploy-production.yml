@@ -66,6 +66,17 @@ jobs:
           node-version: 20
           cache: npm
 
+      # Corre ANTES del build a propósito. `vite build` no detecta referencias
+      # a variables no definidas — en agosto tres ReferenceError llegaron a
+      # producción y dejaron la app en blanco con el build en verde. Las reglas
+      # no-undef y react/jsx-no-undef son las que atrapan eso.
+      # Falla sólo con errores; las advertencias informan y no bloquean.
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
       - name: Instalar Vercel CLI
         run: npm install --global vercel@latest
 
