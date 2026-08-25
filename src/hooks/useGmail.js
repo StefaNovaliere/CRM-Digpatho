@@ -1,5 +1,5 @@
 // src/hooks/useGmail.js
-import { useState, useCallback } from 'react';
+import { useState } from 'react';
 import { useAuth } from './useAuth';
 import { supabase } from '../lib/supabase';
 import { copyToClipboard as copyText } from '../utils/clipboard';

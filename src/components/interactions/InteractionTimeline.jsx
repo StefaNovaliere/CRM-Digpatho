@@ -1,6 +1,6 @@
 // src/components/interactions/InteractionTimeline.jsx
 import { useState } from 'react';
-import { MessageSquare, Plus, Clock, Filter } from 'lucide-react';
+import { MessageSquare, Plus, Clock } from 'lucide-react';
 import { InteractionItem } from './InteractionItem';
 import { AddInteractionModal } from './AddInteractionModal';
 

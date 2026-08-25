@@ -11,7 +11,6 @@ import {
   RefreshCw,
   ToggleLeft,
   ToggleRight,
-  Save,
   AlertCircle,
   Info
 } from 'lucide-react';

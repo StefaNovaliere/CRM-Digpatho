@@ -69,7 +69,6 @@ export const AddInteractionModal = ({ contactId, onClose, onSuccess }) => {
     }
   };
 
-  const selectedType = interactionTypes.find(t => t.value === formData.type);
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto">

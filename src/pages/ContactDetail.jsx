@@ -227,7 +227,6 @@ export const ContactDetail = () => {
 
   const selectedTone = TONE_OPTIONS.find(t => t.value === emailConfig.tone);
   const selectedLanguage = LANGUAGE_OPTIONS.find(l => l.value === emailConfig.language);
-  const selectedEmailType = EMAIL_TYPE_OPTIONS.find(e => e.value === emailConfig.emailType);
   const selectedProject = PROJECT_OPTIONS.find(p => p.value === emailConfig.project);
 
   return (

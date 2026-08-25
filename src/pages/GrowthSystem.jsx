@@ -21,7 +21,6 @@ import {
   FlaskConical,
   Megaphone,
   CalendarDays,
-  Filter,
   ChevronDown,
   ChevronUp,
   AlertCircle,
