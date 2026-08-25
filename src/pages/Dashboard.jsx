@@ -18,6 +18,8 @@ import { supabase } from '../lib/supabase';
 import { formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { PageContainer } from '../components/common/PageContainer';
+import { StatusBadge } from '../components/common/StatusBadge';
+import { PIPELINE_STAGES, PIPELINE_STAGE_ORDER } from '../config/constants';
 
 // ========================================
 // SENT EMAILS MODAL COMPONENT (NUEVO)
