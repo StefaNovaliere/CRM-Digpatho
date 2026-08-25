@@ -1,0 +1,94 @@
+# Preview por pull request en Vercel
+#
+# Recupera los previews por PR, que es lo único que se pierde al dejar la
+# integración Git nativa de Vercel (ver deploy-production.yml para el porqué).
+# Usa los mismos tres secretos; no hace falta configurar nada extra.
+#
+# Cada push al PR genera un deploy de preview y deja/actualiza un comentario con
+# la URL.
+
+name: Preview (Vercel)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+# Un preview por PR: si se pushea de nuevo, cancela el anterior.
+concurrency:
+  group: vercel-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+jobs:
+  preview:
+    name: Build y deploy de preview
+    runs-on: ubuntu-latest
+
+    # Necesario para poder comentar la URL en el PR.
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurar Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Instalar Vercel CLI
+        run: npm install --global vercel@latest
+
+      # Ojo: entorno "preview", no "production". Son conjuntos de variables
+      # distintos en Vercel.
+      - name: Traer configuración de Vercel
+        run: vercel pull --yes --environment=preview --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Build
+        run: vercel build --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Deploy
+        id: deploy
+        run: |
+          URL=$(vercel deploy --prebuilt --token=${{ secrets.VERCEL_TOKEN }})
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "Preview en: $URL"
+
+      # Actualiza el comentario existente en vez de sumar uno por push.
+      - name: Comentar la URL en el PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const url = '${{ steps.deploy.outputs.url }}';
+            const marca = '<!-- vercel-preview -->';
+            const cuerpo = `${marca}\n🔍 **Preview desplegado**\n\n${url}\n\nCommit: \`${context.sha.slice(0, 7)}\``;
+
+            const comentarios = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const previo = comentarios.data.find(c => c.body?.includes(marca));
+
+            if (previo) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: previo.id,
+                body: cuerpo,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: cuerpo,
+              });
+            }
