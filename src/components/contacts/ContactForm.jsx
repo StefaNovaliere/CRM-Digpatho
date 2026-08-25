@@ -9,15 +9,15 @@ import { supabase } from '../../lib/supabase';
 // ========================================
 // OPCIONES DE SELECT
 // ========================================
+// IMPORTANTE: estos son los únicos valores válidos en la DB.
+// Antes había tres opciones más (pharma_executive, medical_affairs, sales_rep)
+// que la base rechaza: elegirlas hacía fallar el guardado con un alert crudo.
 const ROLE_OPTIONS = [
   { value: 'pathologist', label: 'Patólogo/a' },
   { value: 'researcher', label: 'Investigador/a' },
   { value: 'hospital_director', label: 'Director/a de Hospital' },
   { value: 'lab_manager', label: 'Gerente de Laboratorio' },
   { value: 'procurement', label: 'Compras/Adquisiciones' },
-  { value: 'pharma_executive', label: 'Ejecutivo Pharma' },
-  { value: 'medical_affairs', label: 'Medical Affairs' },
-  { value: 'sales_rep', label: 'Representante de Ventas' },
   { value: 'other', label: 'Otro' },
 ];
 

@@ -12,8 +12,10 @@ import {
   Sparkles
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../hooks/useAuth';
 
 export const AddInteractionModal = ({ contactId, onClose, onSuccess }) => {
+  const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     type: 'email_sent',
@@ -51,7 +53,10 @@ export const AddInteractionModal = ({ contactId, onClose, onSuccess }) => {
           direction: formData.direction,
           subject: formData.subject || null,
           content: formData.content || null,
-          occurred_at: new Date(formData.occurred_at).toISOString()
+          occurred_at: new Date(formData.occurred_at).toISOString(),
+          // Sin esto, las llamadas/reuniones/demos quedan anónimas y no se
+          // pueden contar por persona (métricas de rutinas comerciales).
+          created_by: user?.id || null
         }]);
 
       if (error) throw error;

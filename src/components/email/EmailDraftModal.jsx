@@ -158,7 +158,9 @@ export const EmailDraftModal = ({ isOpen, onClose, contact, draft, isLoading }) 
       subject: editedSubject,
       body: editedBody,
       attachments: attachments.length > 0 ? attachments : undefined,
-      draftId: draft?.id
+      draftId: draft?.id,
+      // Permite registrar la interacción aunque el borrador no se haya guardado
+      contact
     });
 
     setSendResult(result);

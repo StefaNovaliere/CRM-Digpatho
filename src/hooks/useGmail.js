@@ -129,7 +129,7 @@ export const useGmail = () => {
   /**
    * Envía un email con soporte para CC y adjuntos
    */
-  const sendEmail = async ({ to, cc, subject, body, attachments, draftId = null }) => {
+  const sendEmail = async ({ to, cc, subject, body, attachments, draftId = null, contact = null }) => {
     setSending(true);
     setError(null);
 
@@ -164,7 +164,11 @@ export const useGmail = () => {
 
       const result = await response.json();
 
-      // Guardar en la base de datos
+      // --- Registro en la base de datos ---
+      // El contacto puede venir por dos vías: el borrador (si se persistió) o
+      // el objeto `contact` que pasa el modal. Preferimos el del borrador.
+      let contactId = contact?.id || null;
+
       if (draftId) {
         await supabase.from('email_drafts').update({
           status: 'sent',
@@ -178,31 +182,46 @@ export const useGmail = () => {
           .eq('id', draftId)
           .single();
 
-        if (draft?.contact_id) {
-          // Construir contenido con info de CC y adjuntos
-          let interactionContent = body;
-          if (cc && cc.length > 0) {
-            const ccStr = Array.isArray(cc) ? cc.join(', ') : cc;
-            interactionContent = `[CC: ${ccStr}]\n\n${interactionContent}`;
-          }
-          if (attachments && attachments.length > 0) {
-            const attachmentNames = attachments.map(a => a.name).join(', ');
-            interactionContent += `\n\n[Adjuntos: ${attachmentNames}]`;
-          }
+        if (draft?.contact_id) contactId = draft.contact_id;
+      }
 
-          await supabase.from('interactions').insert({
-            contact_id: draft.contact_id,
-            type: 'email_sent',
-            subject: subject,
-            content: interactionContent,
-            direction: 'outbound',
-            occurred_at: new Date().toISOString(),
-            email_draft_id: draftId,
-            created_by: user.id,
-            thread_id: result.threadId,
-            gmail_id: result.id
-          });
+      // Red de seguridad: registramos la interacción aunque NO haya draftId.
+      // Antes esto dependía del borrador, así que si el insert en email_drafts
+      // fallaba (p.ej. falta SUPABASE_SERVICE_KEY), el envío se hacía pero
+      // desaparecía del historial sin ningún aviso.
+      if (contactId) {
+        // Construir contenido con info de CC y adjuntos
+        let interactionContent = body;
+        if (cc && cc.length > 0) {
+          const ccStr = Array.isArray(cc) ? cc.join(', ') : cc;
+          interactionContent = `[CC: ${ccStr}]\n\n${interactionContent}`;
         }
+        if (attachments && attachments.length > 0) {
+          const attachmentNames = attachments.map(a => a.name).join(', ');
+          interactionContent += `\n\n[Adjuntos: ${attachmentNames}]`;
+        }
+
+        const { error: interactionError } = await supabase.from('interactions').insert({
+          contact_id: contactId,
+          type: 'email_sent',
+          subject: subject,
+          content: interactionContent,
+          direction: 'outbound',
+          occurred_at: new Date().toISOString(),
+          email_draft_id: draftId, // null si no hubo borrador
+          created_by: user.id,
+          thread_id: result.threadId,
+          gmail_id: result.id
+        });
+
+        if (interactionError) {
+          console.error('Error registrando la interacción del envío:', interactionError);
+        }
+      } else {
+        console.warn(
+          '[useGmail] Email enviado sin contacto asociado: no queda registrado ' +
+          'en el historial. Pasá `contact` a sendEmail() para evitarlo.'
+        );
       }
 
       return { success: true, messageId: result.id, threadId: result.threadId };

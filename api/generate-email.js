@@ -428,10 +428,24 @@ export default async function handler(req, res) {
       .select()
       .single();
 
-    if (draftError) console.error('Error saving draft:', draftError);
+    // Si el borrador no se persiste, el id queda undefined y el envío posterior
+    // NO se registra en `interactions` (useGmail sólo registra si hay draftId).
+    // Antes esto se silenciaba: el usuario veía "éxito" y el envío desaparecía.
+    // Causa habitual: falta SUPABASE_SERVICE_KEY y el insert con anon key lo
+    // bloquea RLS. Lo devolvemos en la respuesta para que sea visible.
+    if (draftError) {
+      console.error(
+        '[generate-email] No se pudo guardar el borrador en email_drafts. ' +
+        'El envío no quedará registrado en el historial. ' +
+        'Verificá SUPABASE_SERVICE_KEY en las variables de entorno. Detalle:',
+        draftError
+      );
+    }
 
     return res.status(200).json({
       success: true,
+      draft_persisted: !draftError && !!draft?.id,
+      draft_error: draftError ? (draftError.message || 'No se pudo guardar el borrador') : null,
       result: {
         id: draft?.id,
         subject: parsed.subject,
