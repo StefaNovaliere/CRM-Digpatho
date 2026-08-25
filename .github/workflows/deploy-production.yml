@@ -1,0 +1,95 @@
+# Deploy a producción en Vercel
+#
+# POR QUÉ ESTE WORKFLOW EXISTE
+# El repo vive en una organización de GitHub, y el plan Hobby de Vercel no
+# soporta conectar repos de organizaciones — sólo de cuentas personales. Por eso
+# el deploy automático dejó de dispararse al mover el repo. Este workflow saltea
+# la integración Git de Vercel y despliega con el CLI, que no tiene esa
+# restricción.
+#
+# CONFIGURACIÓN (una sola vez)
+# 1. Correr `vercel link` en local y elegir EL PROYECTO QUE YA EXISTE (no crear
+#    uno nuevo: ver la nota sobre GCP más abajo). Eso genera .vercel/project.json
+#    con orgId y projectId.
+# 2. Crear un token en https://vercel.com/account/tokens con alcance sobre el
+#    equipo, no sólo personal.
+# 3. Cargar los tres secretos en Settings → Secrets and variables → Actions:
+#      VERCEL_TOKEN        el token del paso 2
+#      VERCEL_ORG_ID       "orgId" de .vercel/project.json
+#      VERCEL_PROJECT_ID   "projectId" de .vercel/project.json
+# 4. Desconectar la integración Git vieja en Vercel (Settings → Git) si sigue
+#    apuntando al repo personal, para no terminar con dos fuentes de deploy.
+#
+# NO hace falta cargar ninguna otra variable acá. `vercel pull` baja todas las
+# del proyecto (GCP_WIF_CONFIG, ANTHROPIC_API_KEY, SUPABASE_SERVICE_KEY, las
+# VITE_*), así que siguen viviendo en Vercel como hasta ahora.
+#
+# ⚠️ IMPORTANTE — GCP / Vertex AI
+# api/_vertex-auth.js federa el OIDC token de Vercel contra GCP, y el binding
+# está atado al subject:
+#   owner:<slug-del-equipo>:project:<nombre-del-proyecto>:environment:production
+# Ese subject depende del equipo y del nombre del proyecto EN VERCEL, no del
+# repo de Git. Mientras se use el mismo proyecto de Vercel sigue andando. Si se
+# crea uno nuevo, la búsqueda de emails con Vertex AI va a dar permission_denied
+# y hay que rehacer el binding en GCP.
+
+name: Deploy a producción (Vercel)
+
+on:
+  push:
+    # Se escuchan las dos porque el repo viejo usaba `master` y no está
+    # confirmado con cuál quedó el de la organización. Sobra una, no molesta.
+    branches: [master, main]
+  workflow_dispatch: # permite correrlo a mano desde la pestaña Actions
+
+# Si entran dos pushes seguidos, cancela el deploy viejo en vez de pelearse.
+concurrency:
+  group: vercel-production
+  cancel-in-progress: true
+
+env:
+  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+jobs:
+  deploy:
+    name: Build y deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurar Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Instalar Vercel CLI
+        run: npm install --global vercel@latest
+
+      # Baja la configuración y las variables de entorno del proyecto.
+      # Si este paso falla, el build sale sin las VITE_* y la app queda sin
+      # conexión a Supabase — por eso conviene que falle acá y no en runtime.
+      - name: Traer configuración de Vercel
+        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Build
+        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+
+      # --prebuilt sube el .vercel/output ya generado acá, así Vercel no
+      # vuelve a compilar.
+      - name: Deploy
+        id: deploy
+        run: |
+          URL=$(vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }})
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "Desplegado en: $URL"
+
+      - name: Resumen
+        run: |
+          echo "### Deploy a producción" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- URL: ${{ steps.deploy.outputs.url }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Commit: \`${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
