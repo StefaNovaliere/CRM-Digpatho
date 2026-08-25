@@ -1,5 +1,5 @@
 // src/pages/Contacts.jsx
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Plus,
@@ -10,221 +10,257 @@ import {
   List,
   X,
   Upload,
-  Download,
-  MessageSquare,
-  Mail,
-  MailX,
-  Clock
+  CheckSquare,
+  Square,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../hooks/useAuth';
 import { ContactCard } from '../components/contacts/ContactCard';
 import { ContactForm } from '../components/contacts/ContactForm';
 import { ImportContactsModal } from '../components/contacts/ImportContactsModal';
+import { BulkActionsBar } from '../components/contacts/BulkActionsBar';
+import { PageContainer } from '../components/common/PageContainer';
+import { PIPELINE_STAGES, PRIORITY_LEVELS } from '../config/constants';
+
+const PAGE_SIZE = 50;
+
+// Filtros de seguimiento. El manual trabaja sobre "vencidos", así que esa es
+// la cola que importa; las otras son para revisar la agenda.
+const FOLLOWUP_FILTERS = [
+  { value: 'all', label: 'Todos' },
+  { value: 'overdue', label: 'Vencidos' },
+  { value: 'week', label: 'Esta semana' },
+  { value: 'none', label: 'Sin fecha' },
+];
+
+const CARTERA_FILTERS = [
+  { value: 'all', label: 'Todos' },
+  { value: 'mine', label: 'Mis contactos' },
+  { value: 'team', label: 'Mi equipo' },
+  { value: 'unassigned', label: 'Sin asignar' },
+];
 
 export const Contacts = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { user, profile } = useAuth();
+
   const [contacts, setContacts] = useState([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
+
   const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || '');
-  const [filterInterest, setFilterInterest] = useState('all');
-  const [filterResponse, setFilterResponse] = useState('all'); // NUEVO: filtro de respuesta
+  const [debouncedQuery, setDebouncedQuery] = useState(searchQuery);
+  const [filterStage, setFilterStage] = useState('all');
+  const [filterPriority, setFilterPriority] = useState('all');
+  const [filterCartera, setFilterCartera] = useState('all');
+  const [filterFollowup, setFilterFollowup] = useState('all');
+
   const [viewMode, setViewMode] = useState('grid');
   const [showCreateModal, setShowCreateModal] = useState(searchParams.get('new') === 'true');
   const [showImportModal, setShowImportModal] = useState(false);
 
-  // Stats de respuesta
-  const [responseStats, setResponseStats] = useState({
-    responded: 0,
-    noResponse: 0,
-    notContacted: 0
-  });
+  // Conteos por etapa/prioridad. Se traen aparte con una query mínima
+  // (2 columnas) para que las píldoras muestren números reales sin tener que
+  // cargar todos los contactos completos como se hacía antes.
+  const [counts, setCounts] = useState({ stage: {}, priority: {}, total: 0 });
 
+  const [users, setUsers] = useState([]);
+  const [selected, setSelected] = useState(new Set());
+  const reloadRef = useRef(0);
+
+  // Debounce de la búsqueda: sin esto se dispara una query por tecla.
   useEffect(() => {
-    let mounted = true;
+    const t = setTimeout(() => setDebouncedQuery(searchQuery), 350);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
 
-    const loadContacts = async () => {
-      try {
-        console.log("Cargando contactos con estado de respuesta...");
+  // Volver a la primera página cuando cambia cualquier filtro.
+  useEffect(() => {
+    setPage(0);
+  }, [debouncedQuery, filterStage, filterPriority, filterCartera, filterFollowup]);
 
-        // Cargar contactos
-        const { data: contactsData, error: contactsError } = await supabase
-          .from('contacts')
-          .select(`
-            *,
-            institution:institutions(id, name, city)
-          `)
-          .order('created_at', { ascending: false });
-
-        if (contactsError) throw contactsError;
-
-        // Cargar interacciones para determinar estado de respuesta Y búsqueda por email
-        const { data: interactionsData, error: interactionsError } = await supabase
-          .from('interactions')
-          .select('contact_id, type, direction, subject')
-          .in('type', ['email_sent', 'email_reply', 'email_received']);
-
-        if (interactionsError) throw interactionsError;
-
-        // Procesar estado de respuesta y asuntos de email por contacto
-        const interactionsByContact = {};
-        interactionsData?.forEach(interaction => {
-          if (!interactionsByContact[interaction.contact_id]) {
-            interactionsByContact[interaction.contact_id] = {
-              hasSentEmail: false,
-              hasReceivedReply: false,
-              emailSubjects: []
-            };
-          }
-
-          if (interaction.type === 'email_sent' || interaction.direction === 'outbound') {
-            interactionsByContact[interaction.contact_id].hasSentEmail = true;
-          }
-          if (interaction.type === 'email_reply' || interaction.direction === 'inbound') {
-            interactionsByContact[interaction.contact_id].hasReceivedReply = true;
-          }
-
-          // Acumular asuntos de emails para búsqueda
-          if (interaction.subject) {
-            interactionsByContact[interaction.contact_id].emailSubjects.push(interaction.subject);
-          }
-        });
-
-        // Agregar estado de respuesta a cada contacto
-        const contactsWithResponseStatus = contactsData?.map(contact => {
-          const interactions = interactionsByContact[contact.id];
-          let responseStatus = 'not_contacted'; // Sin contactar
-
-          if (interactions) {
-            if (interactions.hasReceivedReply) {
-              responseStatus = 'responded'; // Respondió
-            } else if (interactions.hasSentEmail) {
-              responseStatus = 'no_response'; // Sin respuesta
-            }
-          }
-
-          return {
-            ...contact,
-            responseStatus,
-            emailSubjects: interactions?.emailSubjects || []
-          };
-        }) || [];
-
-        // Calcular stats
-        const stats = {
-          responded: contactsWithResponseStatus.filter(c => c.responseStatus === 'responded').length,
-          noResponse: contactsWithResponseStatus.filter(c => c.responseStatus === 'no_response').length,
-          notContacted: contactsWithResponseStatus.filter(c => c.responseStatus === 'not_contacted').length
-        };
-
-        if (mounted) {
-          setContacts(contactsWithResponseStatus);
-          setResponseStats(stats);
-        }
-      } catch (error) {
-        console.error('Error loading contacts:', error);
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    };
-
-    loadContacts();
-
-    return () => {
-      mounted = false;
-    };
+  // Usuarios del equipo: para "Mi equipo" y para el selector de asignación.
+  useEffect(() => {
+    supabase
+      .from('user_profiles')
+      .select('id, full_name, email, team, crm_role')
+      .then(({ data }) => setUsers(data || []));
   }, []);
 
-  // Abrir modal si viene con ?new=true
+  // Conteos por píldora
   useEffect(() => {
-    if (searchParams.get('new') === 'true') {
-      setShowCreateModal(true);
+    supabase
+      .from('contacts')
+      .select('stage, priority')
+      .then(({ data }) => {
+        if (!data) return;
+        const stage = {};
+        const priority = {};
+        data.forEach(c => {
+          stage[c.stage] = (stage[c.stage] || 0) + 1;
+          priority[c.priority] = (priority[c.priority] || 0) + 1;
+        });
+        setCounts({ stage, priority, total: data.length });
+      });
+  }, [reloadRef.current]);
+
+  const loadContacts = useCallback(async () => {
+    setLoading(true);
+    try {
+      let query = supabase
+        .from('contacts')
+        .select('*, institution:institutions(id, name, city)', { count: 'exact' });
+
+      if (filterStage !== 'all') query = query.eq('stage', filterStage);
+      if (filterPriority !== 'all') query = query.eq('priority', filterPriority);
+
+      // Cartera. "Mi equipo" se deriva de los usuarios que comparten mi team;
+      // no hay columna de equipo en contacts justamente para que un cambio de
+      // equipo no obligue a reasignar contactos.
+      if (filterCartera === 'mine' && user?.id) {
+        query = query.eq('assigned_to', user.id);
+      } else if (filterCartera === 'unassigned') {
+        query = query.is('assigned_to', null);
+      } else if (filterCartera === 'team') {
+        const myTeam = users.find(u => u.id === user?.id)?.team || profile?.team;
+        const teamIds = myTeam
+          ? users.filter(u => u.team === myTeam).map(u => u.id)
+          : (user?.id ? [user.id] : []);
+        query = teamIds.length ? query.in('assigned_to', teamIds) : query.eq('id', '00000000-0000-0000-0000-000000000000');
+      }
+
+      // Seguimiento
+      const now = new Date();
+      if (filterFollowup === 'overdue') {
+        query = query.lte('next_followup_at', now.toISOString());
+      } else if (filterFollowup === 'week') {
+        const weekAhead = new Date(now);
+        weekAhead.setDate(weekAhead.getDate() + 7);
+        query = query
+          .gte('next_followup_at', now.toISOString())
+          .lte('next_followup_at', weekAhead.toISOString());
+      } else if (filterFollowup === 'none') {
+        query = query.is('next_followup_at', null);
+      }
+
+      // Búsqueda. Nombre/email van directo; institución y asunto de correo
+      // viven en otras tablas, así que se resuelven primero a ids. Va acotado
+      // con .limit() para no traer medio universo.
+      const q = debouncedQuery.trim();
+      if (q) {
+        const like = `%${q}%`;
+        const [{ data: insts }, { data: inters }] = await Promise.all([
+          supabase.from('institutions').select('id').ilike('name', like).limit(200),
+          supabase.from('interactions').select('contact_id').ilike('subject', like).limit(500),
+        ]);
+
+        const instIds = (insts || []).map(i => i.id);
+        const contactIds = [...new Set((inters || []).map(i => i.contact_id).filter(Boolean))];
+
+        const clauses = [
+          `first_name.ilike.${like}`,
+          `last_name.ilike.${like}`,
+          `email.ilike.${like}`,
+        ];
+        if (instIds.length) clauses.push(`institution_id.in.(${instIds.join(',')})`);
+        if (contactIds.length) clauses.push(`id.in.(${contactIds.join(',')})`);
+
+        query = query.or(clauses.join(','));
+      }
+
+      const from = page * PAGE_SIZE;
+      query = query
+        .order('created_at', { ascending: false })
+        .range(from, from + PAGE_SIZE - 1);
+
+      const { data, error, count } = await query;
+      if (error) throw error;
+
+      setContacts(data || []);
+      setTotalCount(count || 0);
+    } catch (err) {
+      console.error('Error loading contacts:', err);
+      setContacts([]);
+      setTotalCount(0);
+    } finally {
+      setLoading(false);
     }
+  }, [debouncedQuery, filterStage, filterPriority, filterCartera, filterFollowup, page, user?.id, users, profile?.team]);
+
+  useEffect(() => {
+    loadContacts();
+  }, [loadContacts]);
+
+  useEffect(() => {
+    if (searchParams.get('new') === 'true') setShowCreateModal(true);
   }, [searchParams]);
 
-  const handleContactCreated = () => {
-    setShowCreateModal(false);
-    window.location.reload();
+  const refresh = () => {
+    reloadRef.current += 1;
+    setSelected(new Set());
+    loadContacts();
   };
 
-  const handleImportSuccess = () => {
-    window.location.reload();
+  const toggleSelect = (id) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
   };
 
-  // Filter contacts
-  const filteredContacts = contacts.filter(contact => {
-    const query = searchQuery.toLowerCase();
-    const matchesSearch =
-      searchQuery === '' ||
-      `${contact.first_name} ${contact.last_name}`.toLowerCase().includes(query) ||
-      contact.email?.toLowerCase().includes(query) ||
-      contact.institution?.name?.toLowerCase().includes(query) ||
-      contact.emailSubjects?.some(subject => subject.toLowerCase().includes(query));
+  const toggleSelectAll = () => {
+    const pageIds = contacts.map(c => c.id);
+    const allSelected = pageIds.every(id => selected.has(id));
+    setSelected(allSelected ? new Set() : new Set(pageIds));
+  };
 
-    const matchesInterest =
-      filterInterest === 'all' || contact.interest_level === filterInterest;
+  const hasFilters =
+    debouncedQuery || filterStage !== 'all' || filterPriority !== 'all' ||
+    filterCartera !== 'all' || filterFollowup !== 'all';
 
-    const matchesResponse =
-      filterResponse === 'all' || contact.responseStatus === filterResponse;
+  const clearFilters = () => {
+    setSearchQuery('');
+    setFilterStage('all');
+    setFilterPriority('all');
+    setFilterCartera('all');
+    setFilterFollowup('all');
+  };
 
-    return matchesSearch && matchesInterest && matchesResponse;
-  });
+  const totalPages = Math.ceil(totalCount / PAGE_SIZE);
 
-  const interestFilters = [
-    { value: 'all', label: 'Todos', count: contacts.length },
-    { value: 'hot', label: '🔥 Calientes', count: contacts.filter(c => c.interest_level === 'hot').length },
-    { value: 'warm', label: '🌤️ Tibios', count: contacts.filter(c => c.interest_level === 'warm').length },
-    { value: 'cold', label: '❄️ Fríos', count: contacts.filter(c => c.interest_level === 'cold').length },
-    { value: 'customer', label: '✅ Clientes', count: contacts.filter(c => c.interest_level === 'customer').length },
-  ];
-
-  const responseFilters = [
-    { value: 'all', label: 'Todos', icon: Mail, count: contacts.length },
-    { value: 'responded', label: 'Respondieron', icon: MessageSquare, count: responseStats.responded, color: 'text-green-600 bg-green-50' },
-    { value: 'no_response', label: 'Sin respuesta', icon: MailX, count: responseStats.noResponse, color: 'text-amber-600 bg-amber-50' },
-    { value: 'not_contacted', label: 'Sin contactar', icon: Clock, count: responseStats.notContacted, color: 'text-gray-500 bg-gray-50' },
-  ];
-
-  if (loading) {
-    return (
-      <div className="flex flex-col items-center justify-center h-64 gap-3">
-        <div className="w-10 h-10 border-4 border-primary-500 border-t-transparent rounded-full animate-spin"></div>
-        <p className="text-sm text-gray-500">Cargando contactos...</p>
-      </div>
-    );
-  }
+  const pill = (active) =>
+    `px-3 py-1.5 text-sm font-medium rounded-lg transition-colors whitespace-nowrap ${
+      active ? 'bg-primary-100 text-primary-700' : 'text-gray-600 hover:bg-gray-100'
+    }`;
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <PageContainer>
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Contactos</h1>
-          <p className="text-gray-500 mt-1">{contacts.length} contactos en total</p>
+          <p className="text-gray-500 mt-1">{counts.total} contactos en total</p>
         </div>
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => setShowImportModal(true)}
-            className="btn-secondary"
-          >
+          <button onClick={() => setShowImportModal(true)} className="btn-secondary">
             <Upload size={18} />
             Importar
           </button>
-          <button
-            onClick={() => setShowCreateModal(true)}
-            className="btn-primary"
-          >
+          <button onClick={() => setShowCreateModal(true)} className="btn-primary">
             <Plus size={20} />
             Nuevo Contacto
           </button>
         </div>
       </div>
 
-      {/* Filters Bar */}
+      {/* Filtros */}
       <div className="card p-4 space-y-4">
-        {/* Search + View Toggle */}
         <div className="flex flex-col lg:flex-row gap-4">
-          {/* Search */}
           <div className="relative flex-1">
             <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
@@ -244,22 +280,17 @@ export const Contacts = () => {
             )}
           </div>
 
-          {/* View Mode Toggle */}
-          <div className="flex items-center gap-1 border-l border-gray-200 pl-4">
+          <div className="flex items-center gap-1 lg:border-l border-gray-200 lg:pl-4">
             <button
               onClick={() => setViewMode('grid')}
-              className={`p-2 rounded-lg transition-colors ${
-                viewMode === 'grid' ? 'bg-gray-100 text-gray-900' : 'text-gray-400 hover:text-gray-600'
-              }`}
+              className={`p-2 rounded-lg transition-colors ${viewMode === 'grid' ? 'bg-gray-100 text-gray-900' : 'text-gray-400 hover:text-gray-600'}`}
               title="Vista grilla"
             >
               <Grid3X3 size={18} />
             </button>
             <button
               onClick={() => setViewMode('list')}
-              className={`p-2 rounded-lg transition-colors ${
-                viewMode === 'list' ? 'bg-gray-100 text-gray-900' : 'text-gray-400 hover:text-gray-600'
-              }`}
+              className={`p-2 rounded-lg transition-colors ${viewMode === 'list' ? 'bg-gray-100 text-gray-900' : 'text-gray-400 hover:text-gray-600'}`}
               title="Vista lista"
             >
               <List size={18} />
@@ -267,115 +298,167 @@ export const Contacts = () => {
           </div>
         </div>
 
-        {/* Interest Filter */}
+        {/* Etapa */}
         <div className="flex items-center gap-2 overflow-x-auto pb-1">
           <Filter size={18} className="text-gray-400 flex-shrink-0" />
+          <span className="text-sm text-gray-500 mr-1 flex-shrink-0">Etapa:</span>
           <div className="flex gap-1">
-            {interestFilters.map(filter => (
-              <button
-                key={filter.value}
-                onClick={() => setFilterInterest(filter.value)}
-                className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors whitespace-nowrap ${
-                  filterInterest === filter.value
-                    ? 'bg-primary-100 text-primary-700'
-                    : 'text-gray-600 hover:bg-gray-100'
-                }`}
-              >
-                {filter.label}
-                <span className="ml-1 text-xs opacity-60">({filter.count})</span>
+            <button onClick={() => setFilterStage('all')} className={pill(filterStage === 'all')}>
+              Todas <span className="ml-1 text-xs opacity-60">({counts.total})</span>
+            </button>
+            {Object.values(PIPELINE_STAGES).map(s => (
+              <button key={s.value} onClick={() => setFilterStage(s.value)} className={pill(filterStage === s.value)}>
+                {s.label}
+                <span className="ml-1 text-xs opacity-60">({counts.stage[s.value] || 0})</span>
               </button>
             ))}
           </div>
         </div>
 
-        {/* Response Filter - NUEVO */}
+        {/* Prioridad */}
         <div className="flex items-center gap-2 overflow-x-auto pb-1 pt-2 border-t border-gray-100">
-          <MessageSquare size={18} className="text-gray-400 flex-shrink-0" />
-          <span className="text-sm text-gray-500 mr-2">Estado email:</span>
-          <div className="flex gap-2">
-            {responseFilters.map(filter => {
-              const Icon = filter.icon;
-              const isActive = filterResponse === filter.value;
-              return (
-                <button
-                  key={filter.value}
-                  onClick={() => setFilterResponse(filter.value)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors whitespace-nowrap ${
-                    isActive
-                      ? filter.color || 'bg-primary-100 text-primary-700'
-                      : 'text-gray-600 hover:bg-gray-100'
-                  } ${isActive && filter.value !== 'all' ? filter.color : ''}`}
-                >
-                  <Icon size={14} />
-                  {filter.label}
-                  <span className={`text-xs ${isActive ? 'opacity-80' : 'opacity-60'}`}>
-                    ({filter.count})
-                  </span>
-                </button>
-              );
-            })}
+          <span className="text-sm text-gray-500 mr-1 flex-shrink-0 pl-[26px]">Prioridad:</span>
+          <div className="flex gap-1">
+            <button onClick={() => setFilterPriority('all')} className={pill(filterPriority === 'all')}>
+              Todas
+            </button>
+            {Object.values(PRIORITY_LEVELS).map(p => (
+              <button key={p.value} onClick={() => setFilterPriority(p.value)} className={pill(filterPriority === p.value)}>
+                {p.label}
+                <span className="ml-1 text-xs opacity-60">({counts.priority[p.value] || 0})</span>
+              </button>
+            ))}
           </div>
         </div>
 
-        {/* Active filters indicator */}
-        {(filterInterest !== 'all' || filterResponse !== 'all' || searchQuery) && (
+        {/* Cartera + seguimiento */}
+        <div className="flex flex-wrap items-center gap-4 pt-2 border-t border-gray-100">
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-gray-500 pl-[26px]">Cartera:</span>
+            <div className="flex gap-1">
+              {CARTERA_FILTERS.map(f => (
+                <button key={f.value} onClick={() => setFilterCartera(f.value)} className={pill(filterCartera === f.value)}>
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-gray-500">Seguimiento:</span>
+            <div className="flex gap-1">
+              {FOLLOWUP_FILTERS.map(f => (
+                <button key={f.value} onClick={() => setFilterFollowup(f.value)} className={pill(filterFollowup === f.value)}>
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {hasFilters && (
           <div className="flex items-center justify-between pt-2 border-t border-gray-100">
             <span className="text-sm text-gray-500">
-              Mostrando <strong>{filteredContacts.length}</strong> de {contacts.length} contactos
+              <strong>{totalCount}</strong> contacto{totalCount !== 1 ? 's' : ''} coinciden
             </span>
-            <button
-              onClick={() => {
-                setFilterInterest('all');
-                setFilterResponse('all');
-                setSearchQuery('');
-              }}
-              className="text-sm text-primary-600 hover:text-primary-700 font-medium"
-            >
+            <button onClick={clearFilters} className="text-sm text-primary-600 hover:text-primary-700 font-medium">
               Limpiar filtros
             </button>
           </div>
         )}
       </div>
 
-      {/* Contacts Grid/List */}
-      {filteredContacts.length > 0 ? (
-        <div className={
-          viewMode === 'grid'
-            ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4'
-            : 'space-y-3'
-        }>
-          {filteredContacts.map(contact => (
-            <ContactCard
-              key={contact.id}
-              contact={contact}
-              variant={viewMode === 'list' ? 'compact' : 'default'}
-            />
-          ))}
+      {/* Acciones en lote */}
+      <BulkActionsBar
+        selectedIds={[...selected]}
+        users={users}
+        onDone={refresh}
+        onClear={() => setSelected(new Set())}
+      />
+
+      {/* Seleccionar todo */}
+      {contacts.length > 0 && (
+        <div className="flex items-center justify-between px-1">
+          <button
+            onClick={toggleSelectAll}
+            className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 transition-colors"
+          >
+            {contacts.every(c => selected.has(c.id))
+              ? <CheckSquare size={16} className="text-primary-600" />
+              : <Square size={16} />}
+            Seleccionar los {contacts.length} de esta página
+          </button>
+          {totalPages > 1 && (
+            <span className="text-sm text-gray-500">
+              Página {page + 1} de {totalPages}
+            </span>
+          )}
         </div>
+      )}
+
+      {/* Lista */}
+      {loading ? (
+        <div className="flex flex-col items-center justify-center h-64 gap-3">
+          <div className="w-10 h-10 border-4 border-primary-500 border-t-transparent rounded-full animate-spin" />
+          <p className="text-sm text-gray-500">Cargando contactos...</p>
+        </div>
+      ) : contacts.length > 0 ? (
+        <>
+          <div className={viewMode === 'grid'
+            ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4'
+            : 'space-y-3'}>
+            {contacts.map(contact => (
+              <ContactCard
+                key={contact.id}
+                contact={contact}
+                variant={viewMode === 'list' ? 'compact' : 'default'}
+                selectable
+                selected={selected.has(contact.id)}
+                onToggleSelect={() => toggleSelect(contact.id)}
+              />
+            ))}
+          </div>
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-center gap-2 pt-2">
+              <button
+                onClick={() => setPage(p => Math.max(0, p - 1))}
+                disabled={page === 0}
+                className="btn-secondary py-2 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <ChevronLeft size={16} />
+                Anterior
+              </button>
+              <span className="text-sm text-gray-500 px-3">
+                {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, totalCount)} de {totalCount}
+              </span>
+              <button
+                onClick={() => setPage(p => p + 1)}
+                disabled={page + 1 >= totalPages}
+                className="btn-secondary py-2 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Siguiente
+                <ChevronRight size={16} />
+              </button>
+            </div>
+          )}
+        </>
       ) : (
         <div className="card p-12 text-center">
           <Users size={48} className="mx-auto text-gray-300 mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 mb-1">
-            No se encontraron contactos
-          </h3>
+          <h3 className="text-lg font-medium text-gray-900 mb-1">No se encontraron contactos</h3>
           <p className="text-gray-500 mb-4">
-            {searchQuery || filterInterest !== 'all' || filterResponse !== 'all'
-              ? 'Prueba con otros filtros de búsqueda'
-              : 'Comienza agregando tu primer contacto o importando desde un archivo'}
+            {hasFilters
+              ? 'Probá con otros filtros de búsqueda'
+              : 'Comenzá agregando tu primer contacto o importando desde un archivo'}
           </p>
-          {!searchQuery && filterInterest === 'all' && filterResponse === 'all' && (
+          {!hasFilters && (
             <div className="flex items-center justify-center gap-3">
-              <button
-                onClick={() => setShowImportModal(true)}
-                className="btn-secondary"
-              >
+              <button onClick={() => setShowImportModal(true)} className="btn-secondary">
                 <Upload size={18} />
                 Importar Excel
               </button>
-              <button
-                onClick={() => setShowCreateModal(true)}
-                className="btn-primary"
-              >
+              <button onClick={() => setShowCreateModal(true)} className="btn-primary">
                 <Plus size={20} />
                 Agregar Contacto
               </button>
@@ -384,24 +467,22 @@ export const Contacts = () => {
         </div>
       )}
 
-      {/* Create Modal */}
       {showCreateModal && (
         <ContactForm
           onClose={() => {
             setShowCreateModal(false);
             navigate('/contacts', { replace: true });
           }}
-          onSuccess={handleContactCreated}
+          onSuccess={() => { setShowCreateModal(false); refresh(); }}
         />
       )}
 
-      {/* Import Modal */}
       <ImportContactsModal
         isOpen={showImportModal}
         onClose={() => setShowImportModal(false)}
-        onSuccess={handleImportSuccess}
+        onSuccess={() => { setShowImportModal(false); refresh(); }}
       />
-    </div>
+    </PageContainer>
   );
 };
 
