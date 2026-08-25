@@ -44,6 +44,7 @@ import { LeadDetailModal } from '../components/growth/LeadDetailModal';
 import { QueryManagerModal } from '../components/growth/QueryManagerModal';
 import { BulkEmailSearch } from '../components/growth/BulkEmailSearch';
 import { GROWTH_VERTICALS, GROWTH_LEAD_STATUSES, GROWTH_DRAFT_STATUSES } from '../config/constants';
+import { PageContainer } from '../components/common/PageContainer';
 
 // ========================================
 // Constantes de UI
@@ -304,7 +305,7 @@ export const GrowthSystem = () => {
     : drafts;
 
   return (
-    <div className="p-6 max-w-7xl mx-auto animate-fade-in">
+    <PageContainer gap="none">
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
@@ -953,7 +954,7 @@ export const GrowthSystem = () => {
           deleteCustomQuery={deleteCustomQuery}
         />
       )}
-    </div>
+    </PageContainer>
   );
 };
 
