@@ -6,22 +6,18 @@ import {
   Building2,
   Mail,
   Flame,
-  Snowflake,
   Clock,
   ArrowRight,
   Sparkles,
   Plus,
-  TrendingUp,
-  Zap,
   Target,
   Calendar,
-  X,
-  Search,
-  ExternalLink
+  X
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
+import { PageContainer } from '../components/common/PageContainer';
 
 // ========================================
 // SENT EMAILS MODAL COMPONENT (NUEVO)
@@ -220,14 +216,6 @@ const QuickActionCard = ({ icon: Icon, title, description, onClick, gradient }) 
 // CONTACT ROW
 // ========================================
 const ContactRow = ({ contact, showGenerateButton = false }) => {
-  const interestConfig = {
-    cold: { label: 'Frío', bg: 'bg-slate-100', text: 'text-slate-600' },
-    warm: { label: 'Tibio', bg: 'bg-amber-100', text: 'text-amber-700' },
-    hot: { label: 'Caliente', bg: 'bg-orange-100', text: 'text-orange-700' },
-    customer: { label: 'Cliente', bg: 'bg-emerald-100', text: 'text-emerald-700' },
-  };
-  const interest = interestConfig[contact.interest_level] || interestConfig.cold;
-
   return (
     <Link
       to={`/contacts/${contact.id}`}
@@ -247,9 +235,7 @@ const ContactRow = ({ contact, showGenerateButton = false }) => {
         </div>
       </div>
       <div className="flex items-center gap-3">
-        <span className={`px-2.5 py-1 text-xs font-semibold rounded-full ${interest.bg} ${interest.text}`}>
-          {interest.label}
-        </span>
+        <StatusBadge status={contact.stage} variant="stage" size="sm" />
         {showGenerateButton && (
           <span className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white rounded-lg opacity-0 group-hover:opacity-100 transition-all bg-gradient-to-r from-primary-500 to-primary-700 shadow-sm">
             <Sparkles className="w-3 h-3" />
@@ -299,9 +285,8 @@ export const Dashboard = () => {
   const navigate = useNavigate();
   const [stats, setStats] = useState({
     totalContacts: 0,
-    hotLeads: 0,
-    warmLeads: 0,
-    coldLeads: 0,
+    byStage: {},
+    highPriority: 0,
     institutions: 0,
     emailsSent: 0
   });
@@ -322,7 +307,7 @@ export const Dashboard = () => {
         // Get contacts
         const { data: contacts, error: errContacts } = await supabase
           .from('contacts')
-          .select('id, interest_level');
+          .select('id, stage, priority');
         if (errContacts) throw errContacts;
 
         // Get institutions count
@@ -342,7 +327,7 @@ export const Dashboard = () => {
         const { data: recent, error: errRecent } = await supabase
           .from('contacts')
           .select(`
-            id, first_name, last_name, interest_level,
+            id, first_name, last_name, stage,
             institution:institutions(name)
           `)
           .order('created_at', { ascending: false })
@@ -359,7 +344,7 @@ export const Dashboard = () => {
             id, first_name, last_name, last_interaction_at,
             institution:institutions(name)
           `)
-          .not('interest_level', 'in', '("cold","churned")')
+          .not('stage', 'in', '("lost","customer")')
           .or(`last_interaction_at.lt.${twoWeeksAgo.toISOString()},last_interaction_at.is.null`)
           .order('last_interaction_at', { ascending: true, nullsFirst: true })
           .limit(5);
@@ -368,9 +353,13 @@ export const Dashboard = () => {
         if (mounted) {
             setStats({
                 totalContacts: contacts?.length || 0,
-                hotLeads: contacts?.filter(c => c.interest_level === 'hot').length || 0,
-                warmLeads: contacts?.filter(c => c.interest_level === 'warm').length || 0,
-                coldLeads: contacts?.filter(c => c.interest_level === 'cold').length || 0,
+                byStage: (contacts || []).reduce((acc, c) => {
+                  acc[c.stage] = (acc[c.stage] || 0) + 1;
+                  return acc;
+                }, {}),
+                highPriority: (contacts || []).filter(
+                  c => c.priority === 'alta' || c.priority === 'muy_alta'
+                ).length,
                 institutions: institutionsCount || 0,
                 emailsSent: emailsCount || 0
             });
@@ -402,7 +391,7 @@ export const Dashboard = () => {
   }
 
   return (
-    <div className="space-y-8 animate-fade-in">
+    <PageContainer gap="lg">
       {/* Modal de Emails Enviados */}
       <SentEmailsModal
         isOpen={isEmailHistoryOpen}
@@ -437,12 +426,10 @@ export const Dashboard = () => {
         />
         <StatCard
           icon={Flame}
-          label="Leads Calientes"
-          value={stats.hotLeads}
+          label="Prioridad alta"
+          value={stats.highPriority}
           color="text-orange-600"
           iconBg="bg-orange-100"
-          change={12}
-          changeType="up"
         />
         <StatCard
           icon={Building2}
@@ -553,37 +540,34 @@ export const Dashboard = () => {
         </div>
       </div>
 
-      {/* Pipeline Overview */}
+      {/* Embudo por etapa */}
       <div className="card p-6">
-        <h2 className="mb-4 text-lg font-semibold text-gray-900">Pipeline de Leads</h2>
-        <div className="grid gap-4 sm:grid-cols-3">
-          <div className="p-4 border border-orange-200 rounded-xl bg-orange-50">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm font-medium text-orange-700">Calientes</span>
-              <Flame className="w-5 h-5 text-orange-500" />
-            </div>
-            <p className="text-2xl font-bold text-orange-700">{stats.hotLeads}</p>
-            <p className="text-xs text-orange-600">Listos para cerrar</p>
-          </div>
-          <div className="p-4 border border-amber-200 rounded-xl bg-amber-50">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm font-medium text-amber-700">Tibios</span>
-              <Zap className="w-5 h-5 text-amber-500" />
-            </div>
-            <p className="text-2xl font-bold text-amber-700">{stats.warmLeads}</p>
-            <p className="text-xs text-amber-600">En proceso</p>
-          </div>
-          <div className="p-4 border border-slate-200 rounded-xl bg-slate-50">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm font-medium text-slate-700">Fríos</span>
-              <Snowflake className="w-5 h-5 text-slate-500" />
-            </div>
-            <p className="text-2xl font-bold text-slate-700">{stats.coldLeads}</p>
-            <p className="text-xs text-slate-600">Por nutrir</p>
-          </div>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-gray-900">Embudo por etapa</h2>
+          <Link to="/contacts" className="text-sm text-primary-600 hover:text-primary-700 font-medium">
+            Ver contactos
+          </Link>
+        </div>
+        <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
+          {PIPELINE_STAGE_ORDER.map(key => {
+            const s = PIPELINE_STAGES[key];
+            const count = stats.byStage[key] || 0;
+            const pct = stats.totalContacts ? Math.round((count / stats.totalContacts) * 100) : 0;
+            return (
+              <Link
+                key={key}
+                to={`/contacts?stage=${key}`}
+                className="p-4 border border-gray-200 rounded-xl hover:border-primary-300 hover:shadow-sm transition-all"
+              >
+                <span className="text-sm font-medium text-gray-600">{s.label}</span>
+                <p className="text-2xl font-bold text-gray-900 mt-1">{count}</p>
+                <p className="text-xs text-gray-500">{pct}% del total</p>
+              </Link>
+            );
+          })}
         </div>
       </div>
-    </div>
+    </PageContainer>
   );
 };
 
