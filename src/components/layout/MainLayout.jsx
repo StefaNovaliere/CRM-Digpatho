@@ -4,6 +4,7 @@ import { NavLink, Outlet, useNavigate, Link } from 'react-router-dom';
 import {
   LayoutDashboard,
   Sun,
+  UserCheck,
   Users,
   Building2,
   Settings,
@@ -339,9 +340,13 @@ export const MainLayout = () => {
                               >
                                 <div className="flex gap-3">
                                   <div className={`mt-1 w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
-                                    notif.type === 'email_reply' ? 'bg-emerald-100 text-emerald-600' : 'bg-gray-100 text-gray-500'
+                                    notif.type === 'email_reply' ? 'bg-emerald-100 text-emerald-600' :
+                                    notif.type === 'handoff' ? 'bg-violet-100 text-violet-600' :
+                                    'bg-gray-100 text-gray-500'
                                   }`}>
-                                    {notif.type === 'email_reply' ? <Mail size={14} /> : <Bell size={14} />}
+                                    {notif.type === 'email_reply' ? <Mail size={14} /> :
+                                     notif.type === 'handoff' ? <UserCheck size={14} /> :
+                                     <Bell size={14} />}
                                   </div>
 
                                   <div className="flex-1 min-w-0">

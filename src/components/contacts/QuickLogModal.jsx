@@ -13,7 +13,7 @@
 // Ese "obligatorio" es lo que hace cumplible la regla semanal del manual:
 // "ningún contacto tocado esta semana sin Next follow-up".
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   X,
   Phone,
@@ -28,9 +28,11 @@ import {
   AlertCircle,
   PauseCircle,
   XCircle,
+  UserCheck,
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../hooks/useAuth';
+import { notifyHandoff } from '../../lib/chatNotify';
 import { PIPELINE_STAGES, PRIORITY_LEVELS } from '../../config/constants';
 
 // Sólo los tipos que el enum interaction_type de Postgres acepta.
@@ -80,6 +82,24 @@ export const QuickLogModal = ({ contact, onClose, onLogged }) => {
   const [outcome, setOutcome] = useState('schedule');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+
+  // Traspaso a vendedor
+  const [vendedores, setVendedores] = useState([]);
+  const [handoffTo, setHandoffTo] = useState('');
+
+  // La lista de vendedores se carga una sola vez al abrir el modal. Va arriba
+  // del early return para no cambiar la cantidad de hooks entre renders.
+  useEffect(() => {
+    let cancelado = false;
+    supabase
+      .from('user_profiles')
+      .select('id, full_name, email, crm_role')
+      .eq('crm_role', 'vendedor')
+      .then(({ data }) => {
+        if (!cancelado) setVendedores(data || []);
+      });
+    return () => { cancelado = true; };
+  }, []);
 
   if (!contact) return null;
 
@@ -142,12 +162,42 @@ export const QuickLogModal = ({ contact, onClose, onLogged }) => {
           : null,
       };
       if (stageReallyChanged) updates.stage_changed_at = new Date().toISOString();
+      if (handoffTo) updates.assigned_to = handoffTo;
 
       const { error: contactError } = await supabase
         .from('contacts')
         .update(updates)
         .eq('id', contact.id);
       if (contactError) throw contactError;
+
+      // 4. Traspaso: el manual pide avisarle al vendedor EL MISMO DÍA.
+      if (handoffTo) {
+        const vendedor = vendedores.find(v => v.id === handoffTo);
+        const nombreVendedor = vendedor?.full_name || vendedor?.email || 'un vendedor';
+
+        // La campanita del CRM. La tabla notifications ya soportaba esto sin
+        // cambios de esquema: sólo faltaba quién la escribiera.
+        const { error: notifError } = await supabase.from('notifications').insert({
+          user_id: handoffTo,
+          type: 'handoff',
+          title: `Traspaso: ${fullName}`,
+          message: `${user?.email || 'Un telefonista'} te asignó este contacto${
+            notes ? `. ${notes.slice(0, 60)}` : ''
+          }`,
+          link: `/contacts/${contact.id}`,
+          is_read: false,
+        });
+        if (notifError) console.error('No se pudo crear la notificación del traspaso:', notifError);
+
+        notifyHandoff({
+          senderName: user?.email || 'Alguien',
+          contactName: fullName,
+          institutionName: contact.institution?.name || null,
+          assigneeName: nombreVendedor,
+          priority: PRIORITY_LEVELS[newPriority]?.label,
+          contactId: contact.id,
+        });
+      }
 
       onLogged?.();
       onClose();
@@ -260,7 +310,32 @@ export const QuickLogModal = ({ contact, onClose, onLogged }) => {
               </div>
             </div>
 
-            {/* 4. Próximo paso — el que no se puede saltear */}
+            {/* 4. Traspaso — sólo aparece si hay vendedores configurados */}
+            {vendedores.length > 0 && outcome !== 'discard' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <UserCheck size={14} className="inline mr-1 -mt-0.5" />
+                  Pasar a vendedor <span className="font-normal text-gray-400">(opcional)</span>
+                </label>
+                <select
+                  value={handoffTo}
+                  onChange={(e) => setHandoffTo(e.target.value)}
+                  className="input"
+                >
+                  <option value="">No traspasar</option>
+                  {vendedores.map(v => (
+                    <option key={v.id} value={v.id}>{v.full_name || v.email}</option>
+                  ))}
+                </select>
+                {handoffTo && (
+                  <p className="text-xs text-violet-600 mt-1">
+                    Le llega la notificación en el momento, y el aviso al espacio de Chat.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* 5. Próximo paso — el que no se puede saltear */}
             <div className="p-4 bg-gray-50 rounded-xl border border-gray-200">
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Próximo seguimiento

@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../hooks/useAuth';
+import { notifyCampaignFinished, notifyCampaignFailed } from '../../lib/chatNotify';
 
 // Delay entre emails para evitar rate limiting (en ms)
 const DELAY_BETWEEN_EMAILS = 2000; // 2 segundos
@@ -262,6 +263,21 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
 
     addLog('Iniciando envío masivo...', 'info');
 
+    // Estos contadores se declaran FUERA del try para que el catch pueda
+    // reportar cuánto se alcanzó a enviar antes de que se cortara.
+    let sentCount = progress.sent;
+    let failedCount = progress.failed;
+
+    // Un reintento arranca con envíos ya hechos: sirve para redactar el aviso.
+    const esReintento = progress.sent > 0;
+
+    // El remitente real sale de campaign.sender_id, que puede no ser quien
+    // apretó el botón. interactions.created_by guarda al operador, así que no
+    // sirve para esto: el nombre tiene que coincidir con el From: del correo.
+    const nombreRemitente = (senderProfile || profile)?.full_name
+      || (senderProfile || profile)?.email
+      || 'Alguien';
+
     // Actualizar estado de campaña
     await supabase
       .from('bulk_email_campaigns')
@@ -337,9 +353,6 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
       if (fetchError) throw fetchError;
 
       addLog(`${pendingEmails.length} emails pendientes`, 'info');
-
-      let sentCount = progress.sent;
-      let failedCount = progress.failed;
 
       for (let i = 0; i < pendingEmails.length; i++) {
         // Verificar si se pausó o abortó
@@ -496,6 +509,16 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
         })
         .eq('id', campaign.id);
 
+      // Un solo resumen al final, no uno por destinatario: 17 tarjetas
+      // seguidas harían que el equipo silencie el espacio.
+      notifyCampaignFinished({
+        senderName: nombreRemitente,
+        campaignName: campaign.name,
+        sentCount,
+        failedCount,
+        isRetry: esReintento,
+      });
+
     } catch (err) {
       console.error('Bulk send error:', err);
       setError(err.message);
@@ -506,6 +529,15 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
         .from('bulk_email_campaigns')
         .update({ status: 'failed' })
         .eq('id', campaign.id);
+
+      // El caso que ya les pasó cuatro veces con el token de Gmail vencido:
+      // conviene que alguien se entere sin tener la pantalla abierta.
+      notifyCampaignFailed({
+        senderName: nombreRemitente,
+        campaignName: campaign.name,
+        sentCount,
+        errorMessage: err.message,
+      });
     }
   };
 
