@@ -8,3 +8,8 @@ dist/
 .DS_Store
 __pycache__/
 *.pyc
+
+# Vercel CLI. `vercel pull` deja acá .env.production.local con TODAS las
+# variables del proyecto en texto plano (GCP_WIF_CONFIG, las API keys, la
+# service key de Supabase). Nunca commitear.
+.vercel/
