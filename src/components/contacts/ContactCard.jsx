@@ -3,63 +3,70 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Mail,
-  Phone,
   Building2,
   MapPin,
   Sparkles,
   ChevronRight,
   Clock,
   MessageSquare,
-  Calendar,
-  Linkedin
+  CalendarClock,
+  Linkedin,
+  Star,
+  CheckSquare,
+  Square
 } from 'lucide-react';
-import { formatDistanceToNow } from 'date-fns';
+import { formatDistanceToNow, format, isPast, isToday } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { EmailDraftModal } from '../email/EmailDraftModal';
 import { useEmailGeneration } from '../../hooks/useEmailGeneration';
+import { StatusBadge } from '../common/StatusBadge';
 
-// Badge de nivel de interés
-const InterestBadge = ({ level }) => {
-  const config = {
-    cold: { label: 'Frío', bg: 'bg-slate-100', text: 'text-slate-600', dot: 'bg-slate-400' },
-    warm: { label: 'Tibio', bg: 'bg-amber-50', text: 'text-amber-700', dot: 'bg-amber-400' },
-    hot: { label: 'Caliente', bg: 'bg-orange-50', text: 'text-orange-700', dot: 'bg-orange-500' },
-    customer: { label: 'Cliente', bg: 'bg-green-50', text: 'text-green-700', dot: 'bg-green-500' },
-    churned: { label: 'Ex-cliente', bg: 'bg-red-50', text: 'text-red-700', dot: 'bg-red-400' }
-  };
-
-  const { label, bg, text, dot } = config[level] || config.cold;
+// Muestra el próximo seguimiento y destaca en rojo si ya venció: es la señal
+// que define la cola de trabajo del día.
+const FollowupChip = ({ date }) => {
+  if (!date) return null;
+  const d = new Date(date);
+  const vencido = isPast(d) && !isToday(d);
 
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${bg} ${text}`}>
-      <span className={`w-1.5 h-1.5 rounded-full ${dot}`}></span>
-      {label}
+    <span
+      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${
+        vencido ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'
+      }`}
+      title={vencido ? 'Seguimiento vencido' : 'Próximo seguimiento'}
+    >
+      <CalendarClock size={11} />
+      {format(d, 'd MMM', { locale: es })}
     </span>
   );
 };
 
-// Badge de rol
-const RoleBadge = ({ role }) => {
-  const labels = {
-    pathologist: 'Patólogo',
-    researcher: 'Investigador',
-    hospital_director: 'Director',
-    lab_manager: 'Lab Manager',
-    procurement: 'Compras',
-    other: 'Otro'
-  };
-
-  return (
-    <span className="px-2 py-0.5 bg-blue-50 text-blue-700 text-xs font-medium rounded">
-      {labels[role] || role}
-    </span>
-  );
-};
-
-export const ContactCard = ({ contact, variant = 'default' }) => {
+export const ContactCard = ({
+  contact,
+  variant = 'default',
+  selectable = false,
+  selected = false,
+  onToggleSelect,
+}) => {
   const navigate = useNavigate();
   const [showEmailModal, setShowEmailModal] = useState(false);
   const { generateEmail, isGenerating, generatedDraft, error, clearDraft } = useEmailGeneration();
+
+  const handleToggleSelect = (e) => {
+    e.stopPropagation();
+    onToggleSelect?.();
+  };
+
+  const SelectBox = () =>
+    selectable ? (
+      <button
+        onClick={handleToggleSelect}
+        className="text-gray-400 hover:text-primary-600 transition-colors flex-shrink-0"
+        title={selected ? 'Deseleccionar' : 'Seleccionar'}
+      >
+        {selected ? <CheckSquare size={18} className="text-primary-600" /> : <Square size={18} />}
+      </button>
+    ) : null;
 
   const handleGenerateEmail = async (e) => {
     e.stopPropagation();
@@ -87,24 +94,35 @@ export const ContactCard = ({ contact, variant = 'default' }) => {
       <>
         <div
           onClick={handleCardClick}
-          className="group flex items-center justify-between p-4 bg-white border border-gray-200 rounded-lg hover:border-blue-300 hover:shadow-sm transition-all cursor-pointer"
+          className={`group flex items-center justify-between p-4 bg-white border rounded-lg hover:border-blue-300 hover:shadow-sm transition-all cursor-pointer ${
+            selected ? 'border-primary-400 bg-primary-50/30' : 'border-gray-200'
+          }`}
         >
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4 min-w-0">
+            <SelectBox />
+
             {/* Avatar */}
-            <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center text-white font-semibold text-sm">
+            <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center text-white font-semibold text-sm flex-shrink-0">
               {contact.first_name[0]}{contact.last_name[0]}
             </div>
 
             {/* Info */}
-            <div>
-              <div className="flex items-center gap-2">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="font-semibold text-gray-900">
                   {contact.first_name} {contact.last_name}
                 </h3>
-                <InterestBadge level={contact.interest_level} />
+                <StatusBadge status={contact.stage} variant="stage" size="sm" />
+                <StatusBadge status={contact.priority} variant="priority" size="sm" />
+                <FollowupChip date={contact.next_followup_at} />
+                {contact.is_kol && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-violet-100 text-violet-700">
+                    <Star size={11} /> KOL
+                  </span>
+                )}
               </div>
-              <p className="text-sm text-gray-500">
-                {contact.job_title || contact.role} • {contact.institution?.name || 'Sin institución'}
+              <p className="text-sm text-gray-500 truncate">
+                {contact.job_title || contact.specialty || contact.role} • {contact.institution?.name || 'Sin institución'}
               </p>
             </div>
           </div>
@@ -142,29 +160,53 @@ export const ContactCard = ({ contact, variant = 'default' }) => {
     <>
       <div
         onClick={handleCardClick}
-        className="group bg-white border border-gray-200 rounded-xl hover:border-blue-300 hover:shadow-md transition-all cursor-pointer overflow-hidden"
+        className={`group bg-white border rounded-xl hover:border-blue-300 hover:shadow-md transition-all cursor-pointer overflow-hidden ${
+          selected ? 'border-primary-400 ring-1 ring-primary-200' : 'border-gray-200'
+        }`}
       >
         {/* Header con gradiente sutil */}
         <div className="px-5 pt-5 pb-4 border-b border-gray-100">
-          <div className="flex items-start justify-between">
-            <div className="flex items-center gap-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <SelectBox />
+
               {/* Avatar */}
-              <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center text-white font-bold text-lg shadow-sm">
+              <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center text-white font-bold text-lg shadow-sm flex-shrink-0">
                 {contact.first_name[0]}{contact.last_name[0]}
               </div>
 
-              <div>
-                <h3 className="font-semibold text-gray-900 text-lg leading-tight">
+              <div className="min-w-0">
+                <h3 className="font-semibold text-gray-900 text-lg leading-tight truncate">
                   {contact.first_name} {contact.last_name}
                 </h3>
-                <p className="text-sm text-gray-500 mt-0.5">
-                  {contact.job_title || 'Sin cargo especificado'}
+                <p className="text-sm text-gray-500 mt-0.5 truncate">
+                  {contact.job_title || contact.specialty || 'Sin cargo especificado'}
                 </p>
               </div>
             </div>
 
-            <InterestBadge level={contact.interest_level} />
+            <div className="flex flex-col items-end gap-1 flex-shrink-0">
+              <StatusBadge status={contact.stage} variant="stage" size="sm" />
+              <StatusBadge status={contact.priority} variant="priority" size="sm" />
+            </div>
           </div>
+
+          {/* Seguimiento y KOL */}
+          {(contact.next_followup_at || contact.is_kol || contact.society) && (
+            <div className="flex items-center gap-2 mt-3 flex-wrap">
+              <FollowupChip date={contact.next_followup_at} />
+              {contact.is_kol && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-violet-100 text-violet-700">
+                  <Star size={11} /> KOL
+                </span>
+              )}
+              {contact.society && (
+                <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-sky-50 text-sky-700">
+                  {contact.society}
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Body */}
