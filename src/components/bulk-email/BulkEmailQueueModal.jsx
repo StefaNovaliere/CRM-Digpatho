@@ -12,17 +12,9 @@ import {
   Search
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import { StatusBadge } from '../common/StatusBadge';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
-
-// Status config
-const statusConfig = {
-  pending: { label: 'Pendiente', color: 'bg-gray-100 text-gray-700', icon: Clock },
-  sending: { label: 'Enviando', color: 'bg-amber-100 text-amber-700', icon: RefreshCw },
-  sent: { label: 'Enviado', color: 'bg-green-100 text-green-700', icon: CheckCircle },
-  failed: { label: 'Error', color: 'bg-red-100 text-red-700', icon: XCircle },
-  skipped: { label: 'Omitido', color: 'bg-gray-100 text-gray-500', icon: X },
-};
 
 export const BulkEmailQueueModal = ({ campaign, onClose, onRefresh }) => {
   const [queue, setQueue] = useState([]);
@@ -190,9 +182,6 @@ export const BulkEmailQueueModal = ({ campaign, onClose, onRefresh }) => {
             ) : (
               <div className="divide-y divide-gray-100">
                 {filteredQueue.map((item) => {
-                  const status = statusConfig[item.status] || statusConfig.pending;
-                  const StatusIcon = status.icon;
-
                   return (
                     <div
                       key={item.id}
@@ -204,10 +193,7 @@ export const BulkEmailQueueModal = ({ campaign, onClose, onRefresh }) => {
                             <p className="font-medium text-gray-900 truncate">
                               {item.to_name || item.to_email}
                             </p>
-                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full ${status.color}`}>
-                              <StatusIcon size={12} className={item.status === 'sending' ? 'animate-spin' : ''} />
-                              {status.label}
-                            </span>
+                            <StatusBadge status={item.status} variant="queue" size="sm" />
                           </div>
 
                           {item.to_name && (
