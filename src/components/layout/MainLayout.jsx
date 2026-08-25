@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 import { NavLink, Outlet, useNavigate, Link } from 'react-router-dom';
 import {
   LayoutDashboard,
+  Sun,
   Users,
   Building2,
   Settings,
@@ -137,6 +138,7 @@ export const MainLayout = () => {
   };
 
   const navigation = [
+    { to: '/mi-dia', icon: Sun, label: 'Mi día' },
     { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
     { to: '/contacts', icon: Users, label: 'Contactos' },
     { to: '/institutions', icon: Building2, label: 'Instituciones' },
