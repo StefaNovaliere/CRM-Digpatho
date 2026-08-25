@@ -1,8 +1,9 @@
 // src/hooks/useGmail.js
-import { useState, useCallback } from 'react';
+import { useState } from 'react';
 import { useAuth } from './useAuth';
 import { supabase } from '../lib/supabase';
 import { copyToClipboard as copyText } from '../utils/clipboard';
+import { notifyEmailSent } from '../lib/chatNotify';
 
 // Google OAuth Token Endpoint
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -224,6 +225,19 @@ export const useGmail = () => {
           'en el historial. Pasá `contact` a sendEmail() para evitarlo.'
         );
       }
+
+      // Aviso al espacio de Google Chat. Va DESPUÉS de todas las escrituras y
+      // no lleva await: notifyEmailSent no es async justamente para que un
+      // problema en Chat no pueda demorar ni romper el envío.
+      notifyEmailSent({
+        senderName: profile?.full_name || user?.email || 'Alguien',
+        recipientName: contact
+          ? `${contact.first_name || ''} ${contact.last_name || ''}`.trim() || 'un contacto'
+          : 'un contacto',
+        institutionName: contact?.institution?.name || null,
+        subject,
+        contactId: contactId || null,
+      });
 
       return { success: true, messageId: result.id, threadId: result.threadId };
 

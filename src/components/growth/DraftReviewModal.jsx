@@ -17,8 +17,6 @@ import {
   MessageSquare,
   AtSign,
   Send,
-  Plus,
-  ChevronDown,
   RefreshCw,
   AlertCircle,
   FileText,
@@ -61,19 +59,22 @@ export const DraftReviewModal = ({ draft, onClose, onApprove, onReject, onViewLe
   const [approving, setApproving] = useState(false);
   const [campaignError, setCampaignError] = useState(null);
 
+  // Este efecto tiene que quedar ARRIBA del `if (!draft) return null`.
+  // Si va abajo, cuando draft es null el componente sale antes de registrarlo
+  // y la cantidad de hooks cambia entre renders — React tira "Rendered more
+  // hooks than during the previous render". El guard real está adentro.
+  useEffect(() => {
+    if (showCampaignStep) {
+      loadCampaigns();
+    }
+  }, [showCampaignStep]);
+
   if (!draft) return null;
 
   const lead = draft.lead || {};
   const verticalConfig = GROWTH_VERTICALS[draft.vertical] || {};
   const gradientClass = verticalColors[draft.vertical] || 'from-gray-500 to-gray-600';
   const description = (lead.extra_data?.description || '').replace(/<\/?cite[^>]*>/gi, '');
-
-  // Load available campaigns when campaign step is shown
-  useEffect(() => {
-    if (showCampaignStep) {
-      loadCampaigns();
-    }
-  }, [showCampaignStep]);
 
   const loadCampaigns = async () => {
     setLoadingCampaigns(true);

@@ -7,11 +7,7 @@ import {
   AlertCircle,
   CheckCircle,
   ArrowRight,
-  ChevronDown,
-  Loader2,
-  Download,
-  Eye,
-  Users
+  Loader2
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import * as XLSX from 'xlsx';
@@ -406,7 +402,7 @@ export const ImportContactsModal = ({ isOpen, onClose, onSuccess }) => {
           seenEmails.add(contact.email.toLowerCase());
         }
 
-        const { data, error } = await supabase
+        const { error } = await supabase
           .from('contacts')
           .insert([contact])
           .select();

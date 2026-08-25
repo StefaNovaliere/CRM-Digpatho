@@ -17,7 +17,6 @@ import {
   User
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { useAuth } from '../hooks/useAuth';
 import { BulkEmailImportModal } from '../components/bulk-email/BulkEmailImportModal';
 import { BulkEmailQueueModal } from '../components/bulk-email/BulkEmailQueueModal';
 import { BulkEmailSender } from '../components/bulk-email/BulkEmailSender';
@@ -27,7 +26,6 @@ import { es } from 'date-fns/locale';
 import { PageContainer } from '../components/common/PageContainer';
 
 export const BulkEmail = () => {
-  const { user } = useAuth();
   const [campaigns, setCampaigns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showImportModal, setShowImportModal] = useState(false);

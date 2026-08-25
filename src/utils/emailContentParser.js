@@ -37,12 +37,17 @@ export const parseEmailContent = (rawContent) => {
     'Ã³': 'ó',
     'Ãº': 'ú',
     'Ã±': 'ñ',
-    'Ã': 'Á',
-    'Ã‰': 'É',
+    // OJO: acá había dos entradas con la MISMA clave ('Ã' a secas), una
+    // mapeando a 'Á' y otra a 'Í'. Las dos perdieron su segundo byte al
+    // generarse el mojibake (Á es C3 81 e Í es C3 8D, y 0x81/0x8D no existen
+    // en CP1252), así que son indistinguibles y no hay forma de recuperar
+    // cuál era cuál. JS se quedaba con la última, o sea que 'Á' nunca se
+    // aplicaba. Se deja sólo una para que el mapa sea honesto.
     'Ã': 'Í',
+    'Ã‰': 'É',
     'Ã"': 'Ó',
     'Ãš': 'Ú',
-    'Ã'': 'Ñ',
+    'Ã‘': 'Ñ',
     'Â°': '°',
     'Â´': '´',
     '&lt;': '<',
