@@ -15,9 +15,12 @@ import {
   X
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../hooks/useAuth';
 import { formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { PageContainer } from '../components/common/PageContainer';
+import { StatusBadge } from '../components/common/StatusBadge';
+import { PIPELINE_STAGES, PIPELINE_STAGE_ORDER } from '../config/constants';
 
 // ========================================
 // SENT EMAILS MODAL COMPONENT (NUEVO)
@@ -283,6 +286,8 @@ const PendingRow = ({ contact }) => (
 // ========================================
 export const Dashboard = () => {
   const navigate = useNavigate();
+  const { user, profile } = useAuth();
+
   const [stats, setStats] = useState({
     totalContacts: 0,
     byStage: {},
@@ -292,22 +297,65 @@ export const Dashboard = () => {
   });
   const [recentContacts, setRecentContacts] = useState([]);
   const [pendingFollowups, setPendingFollowups] = useState([]);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [activity, setActivity] = useState({ interacciones: 0, correos: 0 });
   const [loading, setLoading] = useState(true);
+
+  // Alcance y período. Antes el Dashboard era 100% global: dos vendedores
+  // veían números idénticos y no había ninguna dimensión temporal.
+  const [scope, setScope] = useState('all');   // mine | team | all
+  const [period, setPeriod] = useState('week'); // today | week | month
+  const [teamIds, setTeamIds] = useState(null);
 
   // Nuevo estado para el modal de historial de emails
   const [isEmailHistoryOpen, setIsEmailHistoryOpen] = useState(false);
+
+  // "Mi equipo" se deriva de quién comparte mi team, no se guarda en contacts.
+  useEffect(() => {
+    if (scope !== 'team' || !profile?.team) { setTeamIds(null); return; }
+    let cancelado = false;
+    supabase
+      .from('user_profiles').select('id').eq('team', profile.team)
+      .then(({ data }) => { if (!cancelado) setTeamIds((data || []).map(u => u.id)); });
+    return () => { cancelado = true; };
+  }, [scope, profile?.team]);
 
   useEffect(() => {
     let mounted = true;
 
     const loadDashboardData = async () => {
       try {
-        console.log("Cargando Dashboard...");
+        // Filtro de cartera, aplicado a cada consulta de contactos
+        const conAlcance = (q) => {
+          if (scope === 'mine' && user?.id) return q.eq('assigned_to', user.id);
+          if (scope === 'team' && teamIds?.length) return q.in('assigned_to', teamIds);
+          return q;
+        };
 
-        // Get contacts
-        const { data: contacts, error: errContacts } = await supabase
-          .from('contacts')
-          .select('id, stage, priority');
+        const desde = new Date();
+        if (period === 'today') desde.setHours(0, 0, 0, 0);
+        else if (period === 'week') desde.setDate(desde.getDate() - 7);
+        else desde.setDate(desde.getDate() - 30);
+
+        // Conteos EXACTOS con head:true. Antes se traían todas las filas y se
+        // contaba el array, lo que además topa silenciosamente en las 1000
+        // filas que devuelve Supabase por defecto.
+        const stageKeys = ['new', 'contacted', 'qualified', 'customer', 'lost'];
+
+        const [totalRes, prioridadRes, ...porEtapa] = await Promise.all([
+          conAlcance(supabase.from('contacts').select('id', { count: 'exact', head: true })),
+          conAlcance(supabase.from('contacts').select('id', { count: 'exact', head: true })
+            .in('priority', ['alta', 'muy_alta'])),
+          ...stageKeys.map(s =>
+            conAlcance(supabase.from('contacts').select('id', { count: 'exact', head: true }).eq('stage', s))
+          ),
+        ]);
+
+        const contactsCount = totalRes.count || 0;
+        const byStage = Object.fromEntries(
+          stageKeys.map((s, i) => [s, porEtapa[i]?.count || 0])
+        );
+        const errContacts = totalRes.error;
         if (errContacts) throw errContacts;
 
         // Get institutions count
@@ -334,38 +382,59 @@ export const Dashboard = () => {
           .limit(5);
         if (errRecent) throw errRecent;
 
-        // Pending follow-ups (no interaction in 14+ days)
-        const twoWeeksAgo = new Date();
-        twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
+        // Seguimientos vencidos: ahora se usa next_followup_at, que es la
+        // fecha que el equipo fija explícitamente en el registro rápido, en vez
+        // de derivarla de "hace N días que no hay interacción".
+        const hoy = new Date();
+        hoy.setHours(23, 59, 59, 999);
 
-        const { data: pending, error: errPending } = await supabase
-          .from('contacts')
-          .select(`
-            id, first_name, last_name, last_interaction_at,
-            institution:institutions(name)
-          `)
+        const filtroVencidos = (q) => conAlcance(q)
           .not('stage', 'in', '("lost","customer")')
-          .or(`last_interaction_at.lt.${twoWeeksAgo.toISOString()},last_interaction_at.is.null`)
-          .order('last_interaction_at', { ascending: true, nullsFirst: true })
-          .limit(5);
-        if (errPending) throw errPending;
+          .not('next_followup_at', 'is', null)
+          .lte('next_followup_at', hoy.toISOString());
+
+        const [pendingRes, pendingCountRes, actividadRes, correosRes] = await Promise.all([
+          filtroVencidos(
+            supabase.from('contacts').select(`
+              id, first_name, last_name, next_followup_at, priority,
+              institution:institutions(name)
+            `)
+          ).order('next_followup_at', { ascending: true }).limit(5),
+
+          // El conteo real. Antes la UI mostraba "N pendientes" usando el
+          // largo de una lista capada en 5, así que nunca decía más de 5.
+          filtroVencidos(supabase.from('contacts').select('id', { count: 'exact', head: true })),
+
+          // Actividad del período, de interactions (la única fuente real)
+          supabase.from('interactions')
+            .select('id', { count: 'exact', head: true })
+            .gte('occurred_at', desde.toISOString()),
+
+          supabase.from('interactions')
+            .select('id', { count: 'exact', head: true })
+            .eq('type', 'email_sent')
+            .gte('occurred_at', desde.toISOString()),
+        ]);
+
+        const pending = pendingRes.data;
+        if (pendingRes.error) throw pendingRes.error;
 
         if (mounted) {
             setStats({
-                totalContacts: contacts?.length || 0,
-                byStage: (contacts || []).reduce((acc, c) => {
-                  acc[c.stage] = (acc[c.stage] || 0) + 1;
-                  return acc;
-                }, {}),
-                highPriority: (contacts || []).filter(
-                  c => c.priority === 'alta' || c.priority === 'muy_alta'
-                ).length,
+                totalContacts: contactsCount,
+                byStage,
+                highPriority: prioridadRes.count || 0,
                 institutions: institutionsCount || 0,
                 emailsSent: emailsCount || 0
             });
 
             setRecentContacts(recent || []);
             setPendingFollowups(pending || []);
+            setPendingCount(pendingCountRes.count || 0);
+            setActivity({
+              interacciones: actividadRes.count || 0,
+              correos: correosRes.count || 0,
+            });
         }
       } catch (error) {
         console.error('Error loading dashboard:', error);
@@ -379,7 +448,7 @@ export const Dashboard = () => {
     return () => {
         mounted = false;
     };
-  }, []);
+  }, [scope, period, teamIds, user?.id, profile?.team]);
 
   if (loading) {
     return (
@@ -412,6 +481,54 @@ export const Dashboard = () => {
             month: 'long',
             year: 'numeric'
           })}
+        </div>
+      </div>
+
+      {/* Alcance y período. Antes todo era global y sin dimensión temporal:
+          dos vendedores veían exactamente los mismos números. */}
+      <div className="card p-4 flex flex-wrap items-center gap-x-6 gap-y-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm text-gray-500">Cartera:</span>
+          {[
+            { value: 'mine', label: 'Mía' },
+            { value: 'team', label: profile?.team ? `Equipo ${profile.team}` : 'Mi equipo' },
+            { value: 'all', label: 'Todos' },
+          ].map(o => (
+            <button
+              key={o.value}
+              onClick={() => setScope(o.value)}
+              disabled={o.value === 'team' && !profile?.team}
+              className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                scope === o.value ? 'bg-primary-100 text-primary-700' : 'text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm text-gray-500">Actividad:</span>
+          {[
+            { value: 'today', label: 'Hoy' },
+            { value: 'week', label: '7 días' },
+            { value: 'month', label: '30 días' },
+          ].map(o => (
+            <button
+              key={o.value}
+              onClick={() => setPeriod(o.value)}
+              className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                period === o.value ? 'bg-primary-100 text-primary-700' : 'text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              {o.label}
+            </button>
+          ))}
+          <span className="text-sm text-gray-600 ml-1">
+            <strong className="text-gray-900">{activity.interacciones}</strong> interacciones
+            {' · '}
+            <strong className="text-gray-900">{activity.correos}</strong> correos
+          </span>
         </div>
       </div>
 
@@ -521,7 +638,7 @@ export const Dashboard = () => {
               <h2 className="font-semibold text-gray-900">Pendientes de Follow-up</h2>
             </div>
             <span className="px-2.5 py-1 text-xs font-semibold text-amber-700 bg-amber-100 rounded-full">
-              {pendingFollowups.length} pendientes
+              {pendingCount} pendiente{pendingCount === 1 ? '' : 's'}
             </span>
           </div>
           <div className="px-6 py-2 divide-y divide-gray-100">

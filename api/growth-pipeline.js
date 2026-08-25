@@ -214,7 +214,7 @@ function inferNameFromSlug(slug) {
 
 function extractEmailsFromText(text) {
   if (!text) return [];
-  const pattern = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g;
+  const pattern = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
   const emails = text.match(pattern) || [];
   const blockedDomains = new Set(['example.com', 'email.com', 'test.com', 'sentry.io', 'linkedin.com']);
   const blockedExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp'];

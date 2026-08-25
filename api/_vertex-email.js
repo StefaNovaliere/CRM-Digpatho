@@ -4,7 +4,6 @@
 //   - api/email-discovery-ai.js   (discovery individual, leads de la DB)
 //   - api/vertex-email-search.js  (búsqueda masiva desde Excel)
 
-import { getVertexAccessToken, getVertexConfig } from './_vertex-auth.js';
 
 const VERTEX_MODEL = process.env.VERTEX_AI_MODEL || 'gemini-2.5-flash';
 const RETRY_DELAYS = [2000, 4000, 8000];

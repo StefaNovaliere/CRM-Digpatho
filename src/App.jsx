@@ -9,6 +9,7 @@ import { MainLayout } from './components/layout/MainLayout';
 // Pages
 import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
+import { MyDay } from './pages/MyDay';
 import { Contacts } from './pages/Contacts';
 import { ContactDetail } from './pages/ContactDetail';
 import { Institutions } from './pages/Institutions';
@@ -32,6 +33,7 @@ function App() {
           }
         >
           <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/mi-dia" element={<MyDay />} />
           <Route path="/contacts" element={<Contacts />} />
           <Route path="/contacts/:id" element={<ContactDetail />} />
           <Route path="/institutions" element={<Institutions />} />

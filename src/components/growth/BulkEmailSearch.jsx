@@ -49,7 +49,7 @@ const HEADER_ALIASES = {
 };
 
 function matchHeader(header) {
-  const norm = String(header || '').trim().toLowerCase().replace(/[\s\-]+/g, '_');
+  const norm = String(header || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
   for (const [field, aliases] of Object.entries(HEADER_ALIASES)) {
     if (aliases.includes(norm)) return field;
   }
