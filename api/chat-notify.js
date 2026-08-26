@@ -29,12 +29,20 @@ function getSupabase() {
   return createClient(url, key);
 }
 
+// URL base para los botones "Ver en el CRM" de las tarjetas.
+//
+// OJO con el orden: NO usar VERCEL_URL, que es la URL única de cada deploy
+// (crm-digpatho-a1b2c3-....vercel.app). Esas URLs están detrás de la
+// protección de deploys de Vercel, así que el botón mandaba a un login en vez
+// de al CRM. VERCEL_PROJECT_PRODUCTION_URL es el dominio de producción estable
+// y funciona incluso desde deploys de preview.
 function getAppUrl() {
-  return (
+  const dominio =
     process.env.APP_BASE_URL ||
-    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null) ||
-    'https://crm-digpatho.vercel.app'
-  );
+    process.env.VERCEL_PROJECT_PRODUCTION_URL ||
+    'crm-digpatho.vercel.app';
+
+  return dominio.startsWith('http') ? dominio : `https://${dominio}`;
 }
 
 // Limpia lo que viene del cliente antes de que llegue al espacio.
