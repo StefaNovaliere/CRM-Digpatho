@@ -37,11 +37,34 @@ export const BulkEmail = () => {
   const loadCampaigns = async () => {
     setLoading(true);
 
-    // Cargar campañas
-    const { data, error: campError } = await supabase
-      .from('bulk_email_campaigns')
-      .select('*')
-      .order('created_at', { ascending: false });
+    // Cargar campañas.
+    // Columnas enumeradas a propósito: con `select('*')` esta consulta se traía
+    // el base64 de TODOS los adjuntos de TODAS las campañas en cada carga de la
+    // pantalla. La lista sólo necesita el resumen (cuántos y cómo se llama el
+    // primero); el contenido lo carga el sender de la campaña que se envía.
+    const BASE_COLS = ['id', 'name', 'status', 'total_emails', 'sent_count',
+      'failed_count', 'created_at', 'created_by'];
+    // Columnas que dependen de migraciones que quizá no se corrieron todavía.
+    const OPTIONAL_COLS = ['sender_id', 'followup_days', 'attachment_name',
+      'attachment_content_type', 'attachment_size', 'attachment_count'];
+
+    let cols = [...BASE_COLS, ...OPTIONAL_COLS];
+    let data = null;
+    let campError = null;
+
+    for (let attempt = 0; attempt <= OPTIONAL_COLS.length; attempt++) {
+      ({ data, error: campError } = await supabase
+        .from('bulk_email_campaigns')
+        .select(cols.join(', '))
+        .order('created_at', { ascending: false }));
+
+      if (!campError) break;
+
+      const missing = cols.find(c => OPTIONAL_COLS.includes(c) && campError.message?.includes(c));
+      if (!missing) break;
+      console.warn(`Columna "${missing}" no existe en bulk_email_campaigns, reintentando sin ella.`);
+      cols = cols.filter(c => c !== missing);
+    }
 
     if (campError || !data) {
       setCampaigns([]);
@@ -79,11 +102,23 @@ export const BulkEmail = () => {
       return;
     }
 
-    // Eliminar adjunto de Storage si existe
-    if (campaign.attachment_path) {
-      await supabase.storage
-        .from('attachments')
-        .remove([campaign.attachment_path]);
+    // Borrar los adjuntos de Storage. Las rutas se piden acá, para esta sola
+    // campaña, en vez de traerlas en la lista de todas.
+    if (campaign.attachment_count || campaign.attachment_name) {
+      const { data: adj } = await supabase
+        .from('bulk_email_campaigns')
+        .select('attachments, attachment_path')
+        .eq('id', campaign.id)
+        .single();
+
+      const paths = [
+        ...(Array.isArray(adj?.attachments) ? adj.attachments.map(a => a?.path) : []),
+        adj?.attachment_path,
+      ].filter(Boolean);
+
+      if (paths.length > 0) {
+        await supabase.storage.from('attachments').remove(paths);
+      }
     }
 
     const { error } = await supabase
@@ -275,12 +310,13 @@ export const BulkEmail = () => {
                         </>
                       )}
                       {(() => {
-                        const attCount = Array.isArray(campaign.attachments) && campaign.attachments.length > 0
-                          ? campaign.attachments.length
-                          : (campaign.attachment_name ? 1 : 0);
+                        // Del resumen, no de `attachments`: esa columna ya no
+                        // se trae en la lista porque puede pesar megabytes.
+                        const attCount = campaign.attachment_count
+                          ?? (campaign.attachment_name ? 1 : 0);
                         if (attCount === 0) return null;
                         const label = attCount === 1
-                          ? (Array.isArray(campaign.attachments) && campaign.attachments[0]?.name) || campaign.attachment_name
+                          ? campaign.attachment_name
                           : `${attCount} adjuntos`;
                         return (
                           <>

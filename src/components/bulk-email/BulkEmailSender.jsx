@@ -299,55 +299,95 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
       addLog('Token de Gmail obtenido', 'success');
 
       // Cargar adjuntos de la campaña (una sola vez).
-      // Preferimos el array `attachments` (múltiples); si no existe, caemos al
-      // adjunto único legacy (attachment_base64 / attachment_name).
-      let attachmentsData = [];
-      if (Array.isArray(campaign.attachments) && campaign.attachments.length > 0) {
-        attachmentsData = campaign.attachments
-          .filter(a => a && a.base64 && a.name)
-          .map(a => ({
-            name: a.name,
-            contentType: a.content_type || 'application/octet-stream',
-            base64: a.base64,
-          }));
+      //
+      // Se piden acá y no vienen en el objeto `campaign`: la lista de campañas
+      // ya no trae estas columnas, justamente para no descargar los adjuntos de
+      // todas las campañas cada vez que se abre la pantalla.
+      const attachmentsData = [];
+
+      // Algunas de estas columnas dependen de migraciones que pueden no estar
+      // corridas, y PostgREST falla la consulta entera si pide una que no
+      // existe. Por eso se van descartando de a una.
+      let adjCols = ['attachments', 'attachment_name', 'attachment_content_type',
+        'attachment_size', 'attachment_base64', 'attachment_path'];
+      let adjRow = null;
+
+      for (let intento = 0; intento <= adjCols.length; intento++) {
+        const { data, error: adjError } = await supabase
+          .from('bulk_email_campaigns')
+          .select(adjCols.join(', '))
+          .eq('id', campaign.id)
+          .single();
+
+        if (!adjError) { adjRow = data; break; }
+
+        const faltante = adjCols.find(c => adjError.message?.includes(c));
+        if (!faltante) break;
+        adjCols = adjCols.filter(c => c !== faltante);
+        if (adjCols.length === 0) break;
+      }
+
+      const adj = adjRow || {};
+
+      // Un adjunto puede venir de dos formas: con el contenido embebido
+      // (`base64`, campañas viejas) o con una ruta a Supabase Storage (`path`,
+      // el formato nuevo). El MIME siempre necesita base64, así que las rutas
+      // se descargan y convierten en memoria.
+      const blobToBase64 = async (blob) => {
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        let binary = '';
+        for (let k = 0; k < bytes.length; k++) binary += String.fromCharCode(bytes[k]);
+        return btoa(binary);
+      };
+
+      const resolverAdjunto = async (a) => {
+        if (!a || !a.name) return null;
+        const base = {
+          name: a.name,
+          contentType: a.content_type || a.contentType || 'application/octet-stream',
+        };
+        if (a.base64) return { ...base, base64: a.base64 };
+        if (!a.path) return null;
+
+        const { data: fileBlob, error: downloadError } = await supabase.storage
+          .from('attachments')
+          .download(a.path);
+        if (downloadError) throw new Error(`${a.name}: ${downloadError.message}`);
+        return { ...base, base64: await blobToBase64(fileBlob) };
+      };
+
+      // Lista normalizada: el array `attachments` si existe, si no el adjunto
+      // único de las columnas legacy.
+      let adjuntosCrudos = [];
+      if (Array.isArray(adj.attachments) && adj.attachments.length > 0) {
+        adjuntosCrudos = adj.attachments;
+      } else if (adj.attachment_name && (adj.attachment_base64 || adj.attachment_path)) {
+        adjuntosCrudos = [{
+          name: adj.attachment_name,
+          content_type: adj.attachment_content_type,
+          size: adj.attachment_size,
+          base64: adj.attachment_base64 || undefined,
+          path: adj.attachment_path || undefined,
+        }];
+      }
+
+      if (adjuntosCrudos.length > 0) {
+        const hayQueDescargar = adjuntosCrudos.some(a => a && !a.base64 && a.path);
+        if (hayQueDescargar) addLog('Descargando adjuntos...', 'info');
+
+        for (const a of adjuntosCrudos) {
+          try {
+            const resuelto = await resolverAdjunto(a);
+            if (resuelto) attachmentsData.push(resuelto);
+          } catch (attachErr) {
+            // Un adjunto que falla no cancela la campaña, pero el usuario tiene
+            // que enterarse de que el correo sale incompleto.
+            addLog(`Error al cargar adjunto ${attachErr.message}. Se enviará sin ese archivo.`, 'warning');
+          }
+        }
+
         if (attachmentsData.length > 0) {
           addLog(`${attachmentsData.length} adjunto(s) cargado(s): ${attachmentsData.map(a => a.name).join(', ')}`, 'success');
-        }
-      } else if (campaign.attachment_base64 && campaign.attachment_name) {
-        // Legacy: adjunto único guardado como base64 en la campaña
-        attachmentsData = [{
-          name: campaign.attachment_name,
-          contentType: campaign.attachment_content_type || 'application/octet-stream',
-          base64: campaign.attachment_base64,
-        }];
-        const sizeKB = campaign.attachment_size ? (campaign.attachment_size / 1024).toFixed(1) : '?';
-        addLog(`Adjunto cargado: ${campaign.attachment_name} (${sizeKB} KB)`, 'success');
-      } else if (campaign.attachment_path && campaign.attachment_name) {
-        // Fallback: descargar de Supabase Storage (si el bucket existe)
-        addLog(`Descargando adjunto: ${campaign.attachment_name}...`, 'info');
-        try {
-          const { data: fileBlob, error: downloadError } = await supabase.storage
-            .from('attachments')
-            .download(campaign.attachment_path);
-
-          if (downloadError) throw downloadError;
-
-          const arrayBuffer = await fileBlob.arrayBuffer();
-          const bytes = new Uint8Array(arrayBuffer);
-          let binary = '';
-          for (let i = 0; i < bytes.length; i++) {
-            binary += String.fromCharCode(bytes[i]);
-          }
-          const base64 = btoa(binary);
-
-          attachmentsData = [{
-            name: campaign.attachment_name,
-            contentType: campaign.attachment_content_type || 'application/octet-stream',
-            base64: base64,
-          }];
-          addLog(`Adjunto cargado: ${campaign.attachment_name} (${(fileBlob.size / 1024).toFixed(1)} KB)`, 'success');
-        } catch (attachErr) {
-          addLog(`Error al descargar adjunto: ${attachErr.message}. Se enviará sin adjunto.`, 'warning');
         }
       }
 

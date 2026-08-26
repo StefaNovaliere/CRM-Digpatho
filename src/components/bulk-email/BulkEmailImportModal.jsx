@@ -349,7 +349,8 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
     setError(null);
 
     try {
-      // 0. Convertir adjuntos a base64 si existen (sin depender de Supabase Storage)
+      // Lector a base64, sólo para el camino de respaldo cuando Storage no
+      // está disponible.
       const fileToBase64 = (f) => new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => {
@@ -364,23 +365,11 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
         reader.readAsArrayBuffer(f);
       });
 
-      const attachmentsData = [];
-      for (const f of attachmentFiles) {
-        try {
-          const base64 = await fileToBase64(f);
-          attachmentsData.push({
-            name: f.name,
-            content_type: f.type || 'application/octet-stream',
-            size: f.size,
-            base64,
-          });
-        } catch (readErr) {
-          console.warn('No se pudo leer el adjunto:', f.name, readErr.message);
-          setWarning(`No se pudo leer el adjunto "${f.name}": ${readErr.message}. Se omitirá.`);
-        }
-      }
-
-      // 1. Crear campaña
+      // ── 1. Crear la campaña ─────────────────────────────────────────────
+      // El insert va SIN adjuntos, a propósito: guardarlos en la misma
+      // sentencia hacía que el INSERT superara el statement_timeout de
+      // Postgres y la creación fallara con "57014 canceling statement due to
+      // statement timeout". Los archivos se suben después, por separado.
       const campaignInsert = {
         name: campaignName.trim(),
         status: 'ready',
@@ -390,30 +379,19 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
         followup_days: Number(followupDays) || 0
       };
 
-      // Agregar datos de los adjuntos si existen
-      if (attachmentsData.length > 0) {
-        // Array completo (soporta múltiples adjuntos)
-        campaignInsert.attachments = attachmentsData;
-        // Legacy: guardar el primero también en las columnas viejas por retrocompatibilidad
-        const first = attachmentsData[0];
-        campaignInsert.attachment_name = first.name;
-        campaignInsert.attachment_content_type = first.content_type;
-        campaignInsert.attachment_size = first.size;
-        campaignInsert.attachment_base64 = first.base64;
-      }
-
-      // Campos opcionales que pueden no existir en la tabla aún
-      const optionalFields = ['sender_id', 'followup_days', 'attachments', 'attachment_name', 'attachment_content_type', 'attachment_size', 'attachment_base64'];
+      // Campos opcionales que pueden no existir en la tabla todavía.
+      // El payload es liviano, así que reintentar no cuesta nada.
+      const optionalFields = ['sender_id', 'followup_days'];
 
       let campaign;
       let insertPayload = { ...campaignInsert };
 
-      // Intentar insertar, si falla por columna inexistente, quitar ese campo y reintentar
       for (let attempt = 0; attempt <= optionalFields.length; attempt++) {
         const { data: campData, error: campError } = await supabase
           .from('bulk_email_campaigns')
           .insert(insertPayload)
-          .select()
+          // Sólo el id: traer la fila entera devolvía también los adjuntos.
+          .select('id')
           .single();
 
         if (!campError) {
@@ -421,30 +399,129 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
           break;
         }
 
-        // Buscar qué columna no existe en el mensaje de error
         const missingCol = optionalFields.find(
           col => insertPayload[col] !== undefined && campError.message?.includes(col)
         );
 
         if (missingCol) {
           console.warn(`Columna "${missingCol}" no existe en bulk_email_campaigns, reintentando sin ella.`);
-          if (missingCol === 'attachments' && attachmentsData.length > 1) {
-            setWarning(prev => (prev ? prev + ' ' : '') +
-              'Falta la columna "attachments" en la base de datos: solo se guardará el primer adjunto. Ejecutá la migración 008 para habilitar múltiples adjuntos.');
-          } else if (missingCol.startsWith('attachment_')) {
-            setWarning(prev => prev
-              ? prev + ' Además, el adjunto no se pudo guardar (columna faltante en la base de datos).'
-              : 'El adjunto no se pudo guardar porque falta la columna en la base de datos. Ejecutá el SQL de migración.');
-          }
           delete insertPayload[missingCol];
           continue;
         }
 
-        // Si el error no es de columna inexistente, fallar
         throw campError;
       }
 
       if (!campaign) throw new Error('No se pudo crear la campaña después de múltiples intentos.');
+
+      // ── 1b. Subir los adjuntos ──────────────────────────────────────────
+      // Camino preferido: Supabase Storage. La fila guarda sólo la ruta.
+      // Si el bucket no existe (falta correr la migración 012), se cae al
+      // base64 de siempre, que funciona pero es el que causa el timeout.
+      if (attachmentFiles.length > 0) {
+        const attachmentsData = [];
+        let usoStorage = true;
+
+        for (let i = 0; i < attachmentFiles.length; i++) {
+          const f = attachmentFiles[i];
+          const meta = {
+            name: f.name,
+            content_type: f.type || 'application/octet-stream',
+            size: f.size,
+          };
+
+          if (usoStorage) {
+            // Nombre seguro para una clave de Storage: sin acentos, espacios
+            // ni caracteres que rompan la ruta.
+            const safeName = f.name
+              .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+              .replace(/[^a-zA-Z0-9._-]/g, '_')
+              .slice(-80);
+            const path = `campanas/${campaign.id}/${i}-${safeName}`;
+
+            const { error: upErr } = await supabase.storage
+              .from('attachments')
+              .upload(path, f, { contentType: meta.content_type, upsert: true });
+
+            if (!upErr) {
+              attachmentsData.push({ ...meta, path });
+              continue;
+            }
+
+            // Un solo aviso: si falla el primero, fallan todos por el mismo
+            // motivo (bucket inexistente o sin políticas).
+            console.warn('No se pudo subir el adjunto a Storage, se usará base64:', upErr.message);
+            setWarning(prev => (prev ? prev + ' ' : '') +
+              'Los adjuntos se guardaron dentro de la campaña porque falta el bucket de Storage. ' +
+              'Ejecutá la migración 012 para evitar errores de timeout con archivos grandes.');
+            usoStorage = false;
+          }
+
+          // Fallback: base64 embebido en la fila (comportamiento anterior)
+          try {
+            attachmentsData.push({ ...meta, base64: await fileToBase64(f) });
+          } catch (readErr) {
+            console.warn('No se pudo leer el adjunto:', f.name, readErr.message);
+            setWarning(prev => (prev ? prev + ' ' : '') +
+              `No se pudo leer el adjunto "${f.name}": ${readErr.message}. Se omitirá.`);
+          }
+        }
+
+        if (attachmentsData.length > 0) {
+          // `attachment_count` y `attachment_name` son el resumen que muestra
+          // la lista de campañas sin tener que traerse la columna pesada.
+          const attachmentUpdate = {
+            attachments: attachmentsData,
+            attachment_count: attachmentsData.length,
+            attachment_name: attachmentsData[0].name,
+            attachment_size: attachmentsData.reduce((acc, a) => acc + (a.size || 0), 0),
+          };
+
+          let { error: attErr } = await supabase
+            .from('bulk_email_campaigns')
+            .update(attachmentUpdate)
+            .eq('id', campaign.id);
+
+          // `attachment_count` puede no existir todavía (falta la 012).
+          if (attErr && attErr.message?.includes('attachment_count')) {
+            delete attachmentUpdate.attachment_count;
+            ({ error: attErr } = await supabase
+              .from('bulk_email_campaigns')
+              .update(attachmentUpdate)
+              .eq('id', campaign.id));
+          }
+
+          if (attErr) {
+            if (!attErr.message?.includes('attachments')) throw attErr;
+
+            // La columna `attachments` no existe (falta la migración 008):
+            // se guarda sólo el primero en las columnas viejas.
+            console.warn('Columna "attachments" no existe, usando las columnas legacy.');
+            const first = attachmentsData[0];
+            const legacy = {
+              attachment_name: first.name,
+              attachment_content_type: first.content_type,
+              attachment_size: first.size,
+            };
+            // Storage o base64, según cómo se haya guardado.
+            if (first.path) legacy.attachment_path = first.path;
+            else legacy.attachment_base64 = first.base64;
+
+            const { error: legacyErr } = await supabase
+              .from('bulk_email_campaigns')
+              .update(legacy)
+              .eq('id', campaign.id);
+
+            if (legacyErr) {
+              setWarning(prev => (prev ? prev + ' ' : '') +
+                'Los adjuntos no se pudieron guardar: faltan columnas en la base de datos. Ejecutá las migraciones 006 y 008.');
+            } else if (attachmentsData.length > 1) {
+              setWarning(prev => (prev ? prev + ' ' : '') +
+                'Falta la columna "attachments" en la base de datos: sólo se guardó el primer adjunto. Ejecutá la migración 008 para habilitar múltiples adjuntos.');
+            }
+          }
+        }
+      }
 
       // 2. Procesar cada fila
       const queueItems = [];
