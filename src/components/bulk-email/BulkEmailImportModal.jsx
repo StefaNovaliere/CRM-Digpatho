@@ -14,7 +14,8 @@ import {
   AlertTriangle,
   Paperclip,
   Trash2,
-  Send
+  Send,
+  Clock
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../hooks/useAuth';
@@ -64,6 +65,9 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
   const [warning, setWarning] = useState(null);
   const [previewEmail, setPreviewEmail] = useState(null);
   const [ccEmails, setCcEmails] = useState(''); // Campo CC global para toda la campaña
+  // Días hasta el próximo seguimiento de los contactos de esta campaña.
+  // 0 = no fijar fecha. Se aplica sólo a los que no tengan una puesta a mano.
+  const [followupDays, setFollowupDays] = useState(7);
   const [attachmentFiles, setAttachmentFiles] = useState([]); // Archivos adjuntos para toda la campaña
   const [senderUsers, setSenderUsers] = useState([]); // Usuarios con Gmail conectado
   const [selectedSenderId, setSelectedSenderId] = useState(user?.id || ''); // Remitente seleccionado
@@ -382,7 +386,8 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
         status: 'ready',
         total_emails: fileData.length,
         created_by: user.id,
-        sender_id: selectedSenderId || user.id
+        sender_id: selectedSenderId || user.id,
+        followup_days: Number(followupDays) || 0
       };
 
       // Agregar datos de los adjuntos si existen
@@ -398,7 +403,7 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
       }
 
       // Campos opcionales que pueden no existir en la tabla aún
-      const optionalFields = ['sender_id', 'attachments', 'attachment_name', 'attachment_content_type', 'attachment_size', 'attachment_base64'];
+      const optionalFields = ['sender_id', 'followup_days', 'attachments', 'attachment_name', 'attachment_content_type', 'attachment_size', 'attachment_base64'];
 
       let campaign;
       let insertPayload = { ...campaignInsert };
@@ -713,6 +718,32 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
                   />
                   <p className="text-xs text-gray-500 mt-1">
                     Opcional. Separa múltiples correos con comas.
+                  </p>
+                </div>
+
+                {/* Seguimiento posterior */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <Clock className="w-4 h-4 inline mr-1" />
+                    Próximo seguimiento
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="number"
+                      min="0"
+                      max="365"
+                      value={followupDays}
+                      onChange={(e) => setFollowupDays(e.target.value === '' ? '' : Math.max(0, parseInt(e.target.value) || 0))}
+                      className="input w-24"
+                    />
+                    <span className="text-sm text-gray-500">
+                      días después del envío
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Los contactos van a aparecer en el <strong>&quot;Mi día&quot;</strong> del remitente
+                    pasado ese plazo. Poné <strong>0</strong> para no agendar seguimiento.
+                    No pisa fechas ya cargadas a mano.
                   </p>
                 </div>
 
