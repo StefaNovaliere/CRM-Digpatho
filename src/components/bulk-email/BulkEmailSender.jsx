@@ -278,6 +278,15 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
       || (senderProfile || profile)?.email
       || 'Alguien';
 
+    // A quién se le asignan los contactos de esta campaña. Es el remitente,
+    // no el operador: las respuestas llegan a la casilla del remitente, así
+    // que es quien va a tener que seguir la conversación.
+    const remitenteId = campaign.sender_id || user?.id || null;
+
+    // Días hasta el próximo seguimiento, configurable por campaña
+    // (migración 011). 0 o null = no fijar fecha.
+    const diasSeguimiento = campaign.followup_days ?? 7;
+
     // Actualizar estado de campaña
     await supabase
       .from('bulk_email_campaigns')
@@ -422,29 +431,39 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
             })
             .eq('id', queueItem.id);
 
-          // Registrar interacción en el historial
-          let targetContactId = queueItem.contact_id;
+          // Traer el contacto con su estado actual del pipeline. Se necesita
+          // el estado, no sólo el id, para decidir qué actualizar sin pisar
+          // trabajo previo (ver más abajo).
+          const columnasContacto = 'id, stage, assigned_to, next_followup_at';
+          let contacto = null;
 
-          if (!targetContactId) {
-            const { data: foundContact } = await supabase
+          if (queueItem.contact_id) {
+            const { data } = await supabase
               .from('contacts')
-              .select('id')
+              .select(columnasContacto)
+              .eq('id', queueItem.contact_id)
+              .maybeSingle();
+            contacto = data;
+          } else {
+            // Sin contact_id en la cola, se busca por email. Puede no existir:
+            // el importador sólo crea contactos cuando se mapeó un nombre.
+            const { data } = await supabase
+              .from('contacts')
+              .select(columnasContacto)
               .eq('email', queueItem.to_email)
               .maybeSingle();
-
-            if (foundContact) {
-              targetContactId = foundContact.id;
-            }
+            contacto = data;
           }
 
-          if (targetContactId) {
+          if (contacto) {
+            // 1. El historial del correo
             let historyContent = queueItem.body;
             if (queueItem.cc_emails && Array.isArray(queueItem.cc_emails) && queueItem.cc_emails.length > 0) {
                 historyContent = `[CC: ${queueItem.cc_emails.join(', ')}]\n\n${historyContent}`;
             }
 
             await supabase.from('interactions').insert({
-              contact_id: targetContactId,
+              contact_id: contacto.id,
               type: 'email_sent',
               subject: queueItem.subject,
               content: historyContent,
@@ -454,6 +473,60 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
               thread_id: result.threadId,
               gmail_id: result.id,
             });
+
+            // 2. El pipeline. Las tres reglas son conservadoras a propósito:
+            // una campaña masiva no debe destruir el trabajo de nadie.
+            const updates = {};
+
+            // ETAPA: sólo avanza desde 'new'. Un contacto que ya está
+            // 'qualified' o 'customer' no retrocede porque le llegó un masivo.
+            const etapaActual = contacto.stage || 'new';
+            const avanzaEtapa = etapaActual === 'new';
+            if (avanzaEtapa) {
+              updates.stage = 'contacted';
+              updates.stage_changed_at = new Date().toISOString();
+            }
+
+            // ASIGNACIÓN: sólo si no tiene dueño. Se asigna al REMITENTE
+            // (de cuya casilla salió el correo), no al operador que apretó
+            // enviar: las respuestas le llegan al remitente, así que es quien
+            // va a tener que seguir la conversación.
+            if (!contacto.assigned_to && remitenteId) {
+              updates.assigned_to = remitenteId;
+            }
+
+            // SEGUIMIENTO: sólo si no tenía fecha puesta a mano.
+            if (!contacto.next_followup_at && diasSeguimiento > 0) {
+              const proxima = new Date();
+              proxima.setDate(proxima.getDate() + diasSeguimiento);
+              proxima.setHours(9, 0, 0, 0); // 9am, arranque de jornada
+              updates.next_followup_at = proxima.toISOString();
+            }
+
+            if (Object.keys(updates).length > 0) {
+              const { error: updErr } = await supabase
+                .from('contacts')
+                .update(updates)
+                .eq('id', contacto.id);
+
+              if (updErr) {
+                // No corta el envío: perder la actualización del pipeline es
+                // molesto, pero el correo ya salió y el historial ya quedó.
+                console.error('No se pudo actualizar el contacto:', updErr.message);
+              } else if (avanzaEtapa) {
+                // El rastro para "conversión por etapa" del cierre mensual.
+                const { error: histErr } = await supabase
+                  .from('contact_stage_changes')
+                  .insert({
+                    contact_id: contacto.id,
+                    from_stage: etapaActual,
+                    to_stage: 'contacted',
+                    changed_by: user.id,
+                    note: `Campaña: ${campaign.name}`,
+                  });
+                if (histErr) console.error('No se pudo registrar el cambio de etapa:', histErr.message);
+              }
+            }
           }
 
           sentCount++;
