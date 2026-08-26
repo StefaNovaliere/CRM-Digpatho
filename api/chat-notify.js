@@ -37,12 +37,17 @@ function getSupabase() {
 // de al CRM. VERCEL_PROJECT_PRODUCTION_URL es el dominio de producción estable
 // y funciona incluso desde deploys de preview.
 function getAppUrl() {
-  const dominio =
+  const crudo = (
     process.env.APP_BASE_URL ||
     process.env.VERCEL_PROJECT_PRODUCTION_URL ||
-    'crm-digpatho.vercel.app';
+    'crm-digpatho.vercel.app'
+  ).trim();
 
-  return dominio.startsWith('http') ? dominio : `https://${dominio}`;
+  // Se normaliza a conciencia porque el valor viene de una variable de entorno
+  // cargada a mano: un espacio de más o una barra final alcanzan para generar
+  // una URL inválida, y eso deja la tarjeta ENTERA en blanco (ver boton()).
+  const conEsquema = /^https?:\/\//i.test(crudo) ? crudo : `https://${crudo}`;
+  return conEsquema.replace(/\/+$/, '');
 }
 
 // Limpia lo que viene del cliente antes de que llegue al espacio.
@@ -74,9 +79,34 @@ function campo(label, texto) {
   return { decoratedText: { topLabel: label, text: valor, wrapText: true } };
 }
 
+// Devuelve null si la URL no es absoluta y válida, en vez de un botón roto.
+//
+// POR QUÉ IMPORTA: es un modo de falla documentado de Google Chat. Si la URL de
+// un botón es inválida —por ejemplo relativa— la tarjeta se renderiza
+// COMPLETAMENTE VACÍA. No falla el POST: el webhook responde 200 y el mensaje
+// llega, pero sin nada visible. Es exactamente lo que pasaba cuando APP_BASE_URL
+// quedó cargada con un valor que no formaba una URL válida.
+//
+// Preferimos una tarjeta sin botón antes que una tarjeta en blanco.
 function boton(texto, url) {
   if (!texto || !url) return null;
-  return { buttonList: { buttons: [{ text: String(texto), onClick: { openLink: { url: String(url) } } }] } };
+
+  try {
+    const u = new URL(String(url));
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+      console.error('[chat-notify] URL de botón con protocolo inválido, se omite:', url);
+      return null;
+    }
+    return {
+      buttonList: {
+        buttons: [{ text: String(texto), onClick: { openLink: { url: u.toString() } } }],
+      },
+    };
+  } catch {
+    // URL relativa o mal formada: se omite el botón y se avisa por log.
+    console.error('[chat-notify] URL de botón inválida, se omite el botón:', url);
+    return null;
+  }
 }
 
 // Última línea de defensa antes de postear: si por lo que sea quedó una
