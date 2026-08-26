@@ -60,12 +60,31 @@ function ahora() {
   }).format(new Date());
 }
 
+// Devuelve null si no hay texto, en vez de un widget inválido.
+//
+// POR QUÉ IMPORTA: JSON.stringify ELIMINA las claves con valor undefined. Un
+// campo('Para', undefined) se serializaba como
+//   { decoratedText: { topLabel: 'Para', wrapText: true } }
+// o sea un decoratedText SIN la clave `text`. Google Chat acepta el mensaje
+// (responde 200) pero no puede renderizar ese widget, y la tarjeta entera
+// puede quedar en blanco. Los que llaman filtran los null con .filter(Boolean).
 function campo(label, texto) {
-  return { decoratedText: { topLabel: label, text: texto, wrapText: true } };
+  const valor = texto == null ? '' : String(texto).trim();
+  if (!valor) return null;
+  return { decoratedText: { topLabel: label, text: valor, wrapText: true } };
 }
 
 function boton(texto, url) {
-  return { buttonList: { buttons: [{ text: texto, onClick: { openLink: { url } } }] } };
+  if (!texto || !url) return null;
+  return { buttonList: { buttons: [{ text: String(texto), onClick: { openLink: { url: String(url) } } }] } };
+}
+
+// Última línea de defensa antes de postear: si por lo que sea quedó una
+// tarjeta sin widgets renderizables, es mejor saberlo por log que ver un
+// mensaje vacío en el espacio del equipo.
+function tarjetaTieneContenido(tarjeta) {
+  const secciones = tarjeta?.card?.sections || [];
+  return secciones.some(s => Array.isArray(s.widgets) && s.widgets.length > 0);
 }
 
 // Arma la tarjeta según el tipo. Devuelve null si el tipo no se reconoce.
@@ -79,13 +98,16 @@ function construirTarjeta(payload) {
       const institucion = limpiar(payload.institutionName);
       const asunto = limpiar(payload.subject, 120);
 
-      const widgets = [campo('Para', institucion ? `${destinatario} · ${institucion}` : destinatario)];
-      if (asunto) widgets.push(campo('Asunto', asunto));
-      widgets.push(campo('Hora', ahora()));
-      if (payload.contactId) widgets.push(boton('Ver contacto', `${app}/contacts/${payload.contactId}`));
+      const widgets = [
+        campo('Para', institucion ? `${destinatario} · ${institucion}` : destinatario),
+        campo('Asunto', asunto),
+        campo('Hora', ahora()),
+        payload.contactId ? boton('Ver contacto', `${app}/contacts/${payload.contactId}`) : null,
+      ].filter(Boolean);
 
       return {
         cardId: 'email-sent',
+        texto: `📧 ${remitente} envió un correo a ${destinatario}`,
         card: {
           header: { title: '📧 Correo enviado', subtitle: remitente },
           sections: [{ widgets }],
@@ -101,6 +123,7 @@ function construirTarjeta(payload) {
 
       return {
         cardId: 'campaign-finished',
+        texto: `📬 ${remitente} terminó la campaña «${campana}»: ${enviados} enviados, ${fallidos} fallidos`,
         card: {
           header: { title: titulo, subtitle: remitente },
           sections: [{
@@ -109,7 +132,7 @@ function construirTarjeta(payload) {
               campo('Resultado', `${enviados} enviado${enviados === 1 ? '' : 's'} · ${fallidos} fallido${fallidos === 1 ? '' : 's'}`),
               campo('Hora', ahora()),
               boton('Ver campañas', `${app}/bulk-email`),
-            ],
+            ].filter(Boolean),
           }],
         },
       };
@@ -122,6 +145,7 @@ function construirTarjeta(payload) {
 
       return {
         cardId: 'campaign-failed',
+        texto: `⚠️ La campaña «${campana}» de ${remitente} se interrumpió: ${motivo}`,
         card: {
           header: { title: '⚠️ Campaña interrumpida', subtitle: remitente },
           sections: [{
@@ -130,7 +154,7 @@ function construirTarjeta(payload) {
               campo('Alcanzó a enviar', `${enviados}`),
               campo('Motivo', motivo),
               boton('Ver campañas', `${app}/bulk-email`),
-            ],
+            ].filter(Boolean),
           }],
         },
       };
@@ -142,13 +166,16 @@ function construirTarjeta(payload) {
       const institucion = limpiar(payload.institutionName);
       const prioridad = limpiar(payload.priority, 20);
 
-      const widgets = [campo('Contacto', institucion ? `${contacto} · ${institucion}` : contacto)];
-      if (prioridad) widgets.push(campo('Prioridad', prioridad));
-      widgets.push(campo('Asignado a', destino));
-      if (payload.contactId) widgets.push(boton('Ver contacto', `${app}/contacts/${payload.contactId}`));
+      const widgets = [
+        campo('Contacto', institucion ? `${contacto} · ${institucion}` : contacto),
+        campo('Prioridad', prioridad),
+        campo('Asignado a', destino),
+        payload.contactId ? boton('Ver contacto', `${app}/contacts/${payload.contactId}`) : null,
+      ].filter(Boolean);
 
       return {
         cardId: 'handoff',
+        texto: `🤝 ${remitente} pasó a ${contacto} a ${destino}`,
         card: {
           header: { title: '🤝 Traspaso a vendedor', subtitle: `De ${remitente}` },
           sections: [{ widgets }],
@@ -240,13 +267,38 @@ export default async function handler(req, res) {
     }
 
     // --- Construcción de la tarjeta ---
-    const payload = req.body || {};
+    // req.body puede llegar como string si el Content-Type no era JSON.
+    let payload = req.body || {};
+    if (typeof payload === 'string') {
+      try { payload = JSON.parse(payload); }
+      catch { payload = {}; }
+    }
+
     const tarjeta = construirTarjeta(payload);
     if (!tarjeta) {
+      console.error('[chat-notify] Tipo desconocido. Payload recibido:', JSON.stringify(payload).slice(0, 400));
       return res.status(400).json({ error: 'invalid_type', message: `Tipo de aviso desconocido: ${payload.type}` });
     }
 
-    const body = { cardsV2: [tarjeta] };
+    // `texto` es interno: se saca de la tarjeta y se manda como fallbackText,
+    // que Google Chat usa en las notificaciones push y donde no puede renderizar
+    // la tarjeta. No se muestra dentro del mensaje, así que no duplica nada.
+    const { texto: fallbackText, ...cardConId } = tarjeta;
+
+    // Si la tarjeta quedó sin widgets, mejor un mensaje de texto que un
+    // mensaje vacío en el espacio del equipo.
+    if (!tarjetaTieneContenido(cardConId)) {
+      console.error(
+        '[chat-notify] La tarjeta quedó SIN WIDGETS. Payload:',
+        JSON.stringify(payload).slice(0, 400)
+      );
+      const soloTexto = { text: fallbackText || 'Aviso del CRM (sin contenido para mostrar)' };
+      const alt = await postearConReintentos(webhookUrl, soloTexto);
+      return res.status(200).json({ success: alt.ok, degraded: 'card_empty' });
+    }
+
+    const body = { cardsV2: [cardConId] };
+    if (fallbackText) body.fallbackText = fallbackText;
 
     // --- Ensayo en seco ---
     if (process.env.GCHAT_DRY_RUN === 'true') {
