@@ -30,6 +30,7 @@ import {
   CheckCircle2,
   Star,
   ChevronRight,
+  Settings2,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
@@ -65,10 +66,92 @@ function diasVencido(fecha) {
   return Math.floor(ms / 86400000);
 }
 
+// Estado vacío que explica POR QUÉ está vacío.
+//
+// Una pantalla en blanco es ambigua: el usuario no sabe si no tiene trabajo o
+// si el sistema falló. Y es un caso frecuente — apenas termina una campaña,
+// todos los contactos quedan agendados a 7 días y las tres colas quedan
+// vacías. Ese silencio es justo el momento en que se pierde la confianza en
+// una herramienta nueva.
+const EstadoVacio = ({ motivo, proximaFecha, scope, onVerTodos }) => {
+  const contenido = {
+    sin_rol: {
+      icono: Settings2,
+      color: 'text-amber-500',
+      titulo: 'Falta configurar tu rol',
+      texto: 'Sin un rol comercial asignado no se puede armar tu lista del día ni medir tus metas.',
+      accion: (
+        <Link to="/settings" className="btn-primary">
+          Ir a Configuración
+        </Link>
+      ),
+    },
+    sin_cartera: {
+      icono: Inbox,
+      color: 'text-gray-400',
+      titulo: scope === 'mine' ? 'No tenés contactos asignados' : 'No hay contactos en este alcance',
+      texto: scope === 'mine'
+        ? 'Tu lista del día sale de los contactos que tenés a cargo. Pedí que te asignen cartera, o asignátela desde Contactos con la selección múltiple.'
+        : 'Probá con otro alcance o revisá los filtros.',
+      accion: (
+        <div className="flex items-center justify-center gap-2">
+          {scope === 'mine' && (
+            <button onClick={onVerTodos} className="btn-secondary">
+              Ver los de todos
+            </button>
+          )}
+          <Link to="/contacts" className="btn-primary">
+            Ir a Contactos
+          </Link>
+        </div>
+      ),
+    },
+    al_dia_con_fecha: {
+      icono: CheckCircle2,
+      color: 'text-green-500',
+      titulo: 'Estás al día',
+      texto: `No hay nada vencido para hoy. Tu próximo seguimiento agendado es el ${
+        proximaFecha ? format(new Date(proximaFecha), "d 'de' MMMM", { locale: es }) : 'próximo día hábil'
+      }.`,
+      accion: (
+        <Link to="/contacts" className="btn-secondary">
+          Ver mis contactos
+        </Link>
+      ),
+    },
+    al_dia: {
+      icono: CheckCircle2,
+      color: 'text-green-500',
+      titulo: 'Estás al día',
+      texto: 'No hay seguimientos vencidos ni contactos nuevos esperando en tu cartera.',
+      accion: (
+        <Link to="/contacts" className="btn-secondary">
+          Ver mis contactos
+        </Link>
+      ),
+    },
+  }[motivo] || {};
+
+  const Icono = contenido.icono || CheckCircle2;
+
+  return (
+    <div className="card p-12 text-center">
+      <Icono className={`w-12 h-12 mx-auto mb-4 ${contenido.color || 'text-gray-300'}`} />
+      <h3 className="text-lg font-medium text-gray-900 mb-2">{contenido.titulo}</h3>
+      <p className="text-sm text-gray-500 max-w-md mx-auto mb-5">{contenido.texto}</p>
+      {contenido.accion}
+    </div>
+  );
+};
+
 export const MyDay = () => {
   const { user, profile } = useAuth();
 
   const [scope, setScope] = useState('mine'); // mine | team | all
+  // Para explicar POR QUÉ la pantalla está vacía, que es distinto según
+  // si no hay cartera o si simplemente no vence nada hoy.
+  const [carteraSize, setCarteraSize] = useState(null);
+  const [proximaFecha, setProximaFecha] = useState(null);
   const [teamIds, setTeamIds] = useState(null);
   const [overdue, setOverdue] = useState([]);
   const [uncontacted, setUncontacted] = useState([]);
@@ -114,7 +197,7 @@ export const MyDay = () => {
     inicioDelDia.setHours(0, 0, 0, 0);
 
     try {
-      const [vencidosRes, nuevosRes, traspasosRes, hechasRes] = await Promise.all([
+      const [vencidosRes, nuevosRes, traspasosRes, hechasRes, carteraRes, proximaRes] = await Promise.all([
         // 1. Vencidos: con fecha puesta y ya cumplida
         applyScope(
           supabase.from('contacts').select(SELECT)
@@ -143,6 +226,20 @@ export const MyDay = () => {
           .select('id', { count: 'exact', head: true })
           .eq('created_by', user.id)
           .gte('occurred_at', inicioDelDia.toISOString()),
+
+        // 5. Tamaño de la cartera en este alcance. Sirve para distinguir
+        // "no tengo contactos" de "los tengo pero no vencen hoy", que son
+        // situaciones muy distintas y la pantalla no las diferenciaba.
+        applyScope(supabase.from('contacts').select('id', { count: 'exact', head: true })),
+
+        // 6. El próximo seguimiento agendado. Es lo que permite decir
+        // "estás al día, tu próximo contacto es el X" en vez de un vacío mudo.
+        applyScope(
+          supabase.from('contacts').select('next_followup_at')
+            .not('next_followup_at', 'is', null)
+            .gt('next_followup_at', hoy.toISOString())
+            .not('stage', 'in', '("customer","lost")')
+        ).order('next_followup_at', { ascending: true }).limit(1),
       ]);
 
       const vencidos = (vencidosRes.data || []).sort(byPriorityThenAge);
@@ -153,6 +250,8 @@ export const MyDay = () => {
       setOverdue(vencidos.filter(c => !traspasoIds.has(c.id)));
       setUncontacted((nuevosRes.data || []).sort(byPriorityThenAge));
       setDoneToday(hechasRes.count || 0);
+      setCarteraSize(carteraRes.count || 0);
+      setProximaFecha(proximaRes.data?.[0]?.next_followup_at || null);
     } catch (err) {
       console.error('Error cargando Mi día:', err);
     } finally {
@@ -166,6 +265,17 @@ export const MyDay = () => {
   // La cola 3 sólo completa hasta la meta: no tiene sentido mostrar 171
   // contactos nuevos si el objetivo del día son 30.
   const cupoLibre = Math.max(0, goalTarget - totalPendiente);
+
+  // Las tres colas vacías a la vez es un caso frecuente y legítimo —justo
+  // después de una campaña, por ejemplo, cuando todo quedó agendado a futuro—
+  // pero una pantalla en blanco no lo comunica. Se distingue el motivo para
+  // que nadie tenga que adivinar si no hay trabajo o si algo se rompió.
+  const todoVacio = handoffs.length === 0 && overdue.length === 0 && uncontacted.length === 0;
+  const motivoVacio =
+    !crmRole ? 'sin_rol'
+    : carteraSize === 0 ? 'sin_cartera'
+    : proximaFecha ? 'al_dia_con_fecha'
+    : 'al_dia';
   const nuevosVisibles = uncontacted.slice(0, cupoLibre);
   const progreso = goalTarget ? Math.min(100, Math.round((doneToday / goalTarget) * 100)) : 0;
 
@@ -243,6 +353,13 @@ export const MyDay = () => {
           <RefreshCw className="w-8 h-8 text-gray-300 animate-spin mx-auto mb-3" />
           <p className="text-gray-500">Armando tu lista del día...</p>
         </div>
+      ) : todoVacio ? (
+        <EstadoVacio
+          motivo={motivoVacio}
+          proximaFecha={proximaFecha}
+          scope={scope}
+          onVerTodos={() => setScope('all')}
+        />
       ) : (
         <div className="space-y-6">
           <Cola
