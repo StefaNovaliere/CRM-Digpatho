@@ -16,6 +16,7 @@ import { Institutions } from './pages/Institutions';
 import { Settings } from './pages/Settings';
 import { BulkEmail } from './pages/BulkEmail';
 import { GrowthSystem } from './pages/GrowthSystem';
+import { Seguimientos } from './pages/Seguimientos';
 
 function App() {
   return (
@@ -36,6 +37,7 @@ function App() {
           <Route path="/mi-dia" element={<MyDay />} />
           <Route path="/contacts" element={<Contacts />} />
           <Route path="/contacts/:id" element={<ContactDetail />} />
+          <Route path="/seguimientos" element={<Seguimientos />} />
           <Route path="/institutions" element={<Institutions />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/bulk-email" element={<BulkEmail />} />

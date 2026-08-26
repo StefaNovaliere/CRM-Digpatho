@@ -14,6 +14,8 @@ import {
   Square,
   ChevronLeft,
   ChevronRight,
+  Download,
+  Loader2,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
@@ -23,6 +25,7 @@ import { ImportContactsModal } from '../components/contacts/ImportContactsModal'
 import { BulkActionsBar } from '../components/contacts/BulkActionsBar';
 import { PageContainer } from '../components/common/PageContainer';
 import { PIPELINE_STAGES, PRIORITY_LEVELS } from '../config/constants';
+import { exportarXlsx, fechaTexto, sufijoFecha } from '../utils/exportXlsx';
 
 const PAGE_SIZE = 50;
 
@@ -58,6 +61,10 @@ export const Contacts = () => {
   const [filterPriority, setFilterPriority] = useState('all');
   const [filterCartera, setFilterCartera] = useState('all');
   const [filterFollowup, setFilterFollowup] = useState('all');
+  // Responsable concreto. Convive con las píldoras de Cartera, que son
+  // atajos sobre la misma columna (`assigned_to`): elegir uno limpia el otro
+  // para que nunca haya dos filtros peleando por la misma columna.
+  const [filterResponsable, setFilterResponsable] = useState('all');
 
   const [viewMode, setViewMode] = useState('grid');
   const [showCreateModal, setShowCreateModal] = useState(searchParams.get('new') === 'true');
@@ -70,6 +77,7 @@ export const Contacts = () => {
 
   const [users, setUsers] = useState([]);
   const [selected, setSelected] = useState(new Set());
+  const [exportando, setExportando] = useState(false);
   const reloadRef = useRef(0);
 
   // Debounce de la búsqueda: sin esto se dispara una query por tecla.
@@ -81,7 +89,7 @@ export const Contacts = () => {
   // Volver a la primera página cuando cambia cualquier filtro.
   useEffect(() => {
     setPage(0);
-  }, [debouncedQuery, filterStage, filterPriority, filterCartera, filterFollowup]);
+  }, [debouncedQuery, filterStage, filterPriority, filterCartera, filterFollowup, filterResponsable]);
 
   // Usuarios del equipo: para "Mi equipo" y para el selector de asignación.
   useEffect(() => {
@@ -108,20 +116,26 @@ export const Contacts = () => {
       });
   }, [reloadRef.current]);
 
-  const loadContacts = useCallback(async () => {
-    setLoading(true);
-    try {
-      let query = supabase
-        .from('contacts')
-        .select('*, institution:institutions(id, name, city)', { count: 'exact' });
+  // Arma la consulta con todos los filtros activos, sin ordenar ni paginar.
+  // La usan la pantalla y la exportación: si cada una armara la suya, la
+  // planilla terminaría diciendo algo distinto de lo que se ve.
+  const construirQuery = useCallback(async (select, opciones = {}) => {
+      let query = supabase.from('contacts').select(select, opciones);
 
       if (filterStage !== 'all') query = query.eq('stage', filterStage);
       if (filterPriority !== 'all') query = query.eq('priority', filterPriority);
 
+      // Responsable concreto. Tiene prioridad sobre las píldoras de cartera.
+      if (filterResponsable !== 'all') {
+        query = filterResponsable === 'none'
+          ? query.is('assigned_to', null)
+          : query.eq('assigned_to', filterResponsable);
+      }
+
       // Cartera. "Mi equipo" se deriva de los usuarios que comparten mi team;
       // no hay columna de equipo en contacts justamente para que un cambio de
       // equipo no obligue a reasignar contactos.
-      if (filterCartera === 'mine' && user?.id) {
+      else if (filterCartera === 'mine' && user?.id) {
         query = query.eq('assigned_to', user.id);
       } else if (filterCartera === 'unassigned') {
         query = query.is('assigned_to', null);
@@ -172,12 +186,18 @@ export const Contacts = () => {
         query = query.or(clauses.join(','));
       }
 
+      return query;
+  }, [debouncedQuery, filterStage, filterPriority, filterCartera, filterFollowup, filterResponsable, user?.id, users, profile?.team]);
+
+  const loadContacts = useCallback(async () => {
+    setLoading(true);
+    try {
+      const base = await construirQuery('*, institution:institutions(id, name, city)', { count: 'exact' });
       const from = page * PAGE_SIZE;
-      query = query
+
+      const { data, error, count } = await base
         .order('created_at', { ascending: false })
         .range(from, from + PAGE_SIZE - 1);
-
-      const { data, error, count } = await query;
       if (error) throw error;
 
       setContacts(data || []);
@@ -189,7 +209,7 @@ export const Contacts = () => {
     } finally {
       setLoading(false);
     }
-  }, [debouncedQuery, filterStage, filterPriority, filterCartera, filterFollowup, page, user?.id, users, profile?.team]);
+  }, [construirQuery, page]);
 
   useEffect(() => {
     loadContacts();
@@ -221,7 +241,7 @@ export const Contacts = () => {
 
   const hasFilters =
     debouncedQuery || filterStage !== 'all' || filterPriority !== 'all' ||
-    filterCartera !== 'all' || filterFollowup !== 'all';
+    filterCartera !== 'all' || filterFollowup !== 'all' || filterResponsable !== 'all';
 
   const clearFilters = () => {
     setSearchQuery('');
@@ -229,9 +249,70 @@ export const Contacts = () => {
     setFilterPriority('all');
     setFilterCartera('all');
     setFilterFollowup('all');
+    setFilterResponsable('all');
   };
 
   const totalPages = Math.ceil(totalCount / PAGE_SIZE);
+
+  // Exporta TODO lo que matchea los filtros, no sólo la página visible.
+  // PostgREST devuelve como mucho 1000 filas por request, así que va de a
+  // tandas.
+  const exportar = async () => {
+    setExportando(true);
+    try {
+      const usuariosPorId = Object.fromEntries(users.map(u => [u.id, u]));
+      const TANDA = 1000;
+      const filas = [];
+
+      for (let offset = 0; offset < 10000; offset += TANDA) {
+        const base = await construirQuery(
+          'id, first_name, last_name, email, phone, job_title, specialty, society, is_kol, ' +
+          'stage, priority, assigned_to, next_followup_at, last_interaction_at, ' +
+          'interaction_count, created_at, institution:institutions(name, city)'
+        );
+        const { data, error } = await base
+          .order('created_at', { ascending: false })
+          .range(offset, offset + TANDA - 1);
+        if (error) throw error;
+
+        filas.push(...(data || []));
+        if (!data || data.length < TANDA) break;
+      }
+
+      const responsable = (id) => {
+        if (!id) return 'Sin asignar';
+        const u = usuariosPorId[id];
+        return u?.full_name || u?.email || 'Usuario desconocido';
+      };
+
+      exportarXlsx(`contactos_${sufijoFecha()}.xlsx`, [{
+        nombre: 'Contactos',
+        filas: filas.map(c => ({
+          'Nombre': `${c.first_name || ''} ${c.last_name || ''}`.trim(),
+          'Email': c.email || '',
+          'Teléfono': c.phone || '',
+          'Cargo': c.job_title || '',
+          'Institución': c.institution?.name || '',
+          'Ciudad': c.institution?.city || '',
+          'Especialidad': c.specialty || '',
+          'Sociedad': c.society || '',
+          'KOL': c.is_kol ? 'Sí' : 'No',
+          'Etapa': PIPELINE_STAGES[c.stage]?.label || c.stage || '',
+          'Prioridad': PRIORITY_LEVELS[c.priority]?.label || c.priority || '',
+          'Responsable': responsable(c.assigned_to),
+          'Último contacto': fechaTexto(c.last_interaction_at),
+          'Próximo seguimiento': fechaTexto(c.next_followup_at),
+          'Interacciones': c.interaction_count || 0,
+          'Alta': fechaTexto(c.created_at),
+        })),
+      }]);
+    } catch (err) {
+      console.error('Error exportando contactos:', err);
+      window.alert(`No se pudo exportar: ${err.message}`);
+    } finally {
+      setExportando(false);
+    }
+  };
 
   const pill = (active) =>
     `px-3 py-1.5 text-sm font-medium rounded-lg transition-colors whitespace-nowrap ${
@@ -247,6 +328,10 @@ export const Contacts = () => {
           <p className="text-gray-500 mt-1">{counts.total} contactos en total</p>
         </div>
         <div className="flex items-center gap-3">
+          <button onClick={exportar} disabled={exportando} className="btn-secondary disabled:opacity-60">
+            {exportando ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
+            {exportando ? 'Preparando...' : 'Exportar'}
+          </button>
           <button onClick={() => setShowImportModal(true)} className="btn-secondary">
             <Upload size={18} />
             Importar
@@ -337,11 +422,32 @@ export const Contacts = () => {
             <span className="text-sm text-gray-500 pl-[26px]">Cartera:</span>
             <div className="flex gap-1">
               {CARTERA_FILTERS.map(f => (
-                <button key={f.value} onClick={() => setFilterCartera(f.value)} className={pill(filterCartera === f.value)}>
+                <button
+                  key={f.value}
+                  onClick={() => { setFilterCartera(f.value); setFilterResponsable('all'); }}
+                  className={pill(filterResponsable === 'all' && filterCartera === f.value)}
+                >
                   {f.label}
                 </button>
               ))}
             </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-gray-500">Responsable:</span>
+            <select
+              value={filterResponsable}
+              onChange={(e) => { setFilterResponsable(e.target.value); setFilterCartera('all'); }}
+              className="input py-1.5 text-sm w-auto min-w-[170px]"
+            >
+              <option value="all">Cualquiera</option>
+              {users.map(u => (
+                <option key={u.id} value={u.id}>
+                  {u.full_name || u.email}{u.team ? ` — ${u.team}` : ''}
+                </option>
+              ))}
+              <option value="none">Sin asignar</option>
+            </select>
           </div>
 
           <div className="flex items-center gap-2">
