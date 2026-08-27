@@ -22,7 +22,8 @@ import {
   Mail,
   Loader2,
   Send,
-  Rocket
+  Rocket,
+  ListChecks
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { supabase } from '../../lib/supabase';
@@ -142,6 +143,7 @@ export const MainLayout = () => {
     { to: '/mi-dia', icon: Sun, label: 'Mi día' },
     { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
     { to: '/contacts', icon: Users, label: 'Contactos' },
+    { to: '/seguimientos', icon: ListChecks, label: 'Seguimientos' },
     { to: '/institutions', icon: Building2, label: 'Instituciones' },
     { to: '/bulk-email', icon: Send, label: 'Envío Masivo' },
     { to: '/growth', icon: Rocket, label: 'Growth System', isNew: true },

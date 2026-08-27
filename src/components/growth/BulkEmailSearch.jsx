@@ -28,6 +28,7 @@ import {
   Stethoscope,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { exportarXlsx, sufijoFecha } from '../../utils/exportXlsx';
 import { supabase } from '../../lib/supabase';
 import { StatusBadge } from '../common/StatusBadge';
 import { copyToClipboard } from '../../utils/clipboard';
@@ -140,11 +141,9 @@ function exportResultsToExcel(results) {
     error: r.error || '',
   }));
 
-  const worksheet = XLSX.utils.json_to_sheet(rows);
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, 'Resultados Vertex AI');
-  const filename = `vertex_emails_${new Date().toISOString().slice(0, 10)}.xlsx`;
-  XLSX.writeFile(workbook, filename);
+  exportarXlsx(`vertex_emails_${sufijoFecha()}.xlsx`, [
+    { nombre: 'Resultados Vertex AI', filas: rows },
+  ]);
 }
 
 export const BulkEmailSearch = () => {
