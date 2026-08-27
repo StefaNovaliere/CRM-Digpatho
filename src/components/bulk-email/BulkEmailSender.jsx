@@ -17,6 +17,34 @@ import { notifyCampaignFinished, notifyCampaignFailed } from '../../lib/chatNoti
 // Delay entre emails para evitar rate limiting (en ms)
 const DELAY_BETWEEN_EMAILS = 2000; // 2 segundos
 
+// Un adjunto guardado puede venir de dos formas: con el contenido embebido
+// (`base64`, campañas anteriores al bucket de Storage) o con una ruta a Storage
+// (`path`, el formato nuevo). El MIME siempre necesita base64, así que las
+// rutas se descargan y se convierten en memoria.
+const blobToBase64 = async (blob) => {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = '';
+  for (let k = 0; k < bytes.length; k++) binary += String.fromCharCode(bytes[k]);
+  return btoa(binary);
+};
+
+const resolverAdjunto = async (a) => {
+  if (!a || !a.name) return null;
+  const base = {
+    name: a.name,
+    contentType: a.content_type || a.contentType || 'application/octet-stream',
+    size: a.size || null,
+  };
+  if (a.base64) return { ...base, base64: a.base64 };
+  if (!a.path) return null;
+
+  const { data: fileBlob, error: downloadError } = await supabase.storage
+    .from('attachments')
+    .download(a.path);
+  if (downloadError) throw new Error(`${a.name}: ${downloadError.message}`);
+  return { ...base, base64: await blobToBase64(fileBlob), size: base.size || fileBlob.size };
+};
+
 export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
   const { user, profile } = useAuth();
   const [status, setStatus] = useState('ready'); // ready, sending, paused, completed, error
@@ -26,13 +54,27 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
   const [error, setError] = useState(null);
   const [senderProfile, setSenderProfile] = useState(null); // Perfil del remitente elegido
 
+  // Adjuntos de la campaña, YA RESUELTOS (con su base64 listo para el MIME).
+  // Se cargan al montar, no al mandar, por dos motivos: el recuadro de arriba
+  // muestra exactamente lo que va a viajar —antes lo contaba de otra fuente y
+  // decía "1 adjunto" cuando había 3—, y un archivo que no se puede leer se ve
+  // ANTES de empezar a mandar en vez de a mitad de camino.
+  const [adjuntos, setAdjuntos] = useState([]);
+  const [adjuntosEstado, setAdjuntosEstado] = useState('cargando'); // cargando | listo
+  const [adjuntosAviso, setAdjuntosAviso] = useState(null);
+
   const isPausedRef = useRef(false);
   const abortRef = useRef(false);
+  // La promesa de la carga de adjuntos. El envío la espera en vez de volver a
+  // resolverlos, así no hay dos fuentes ni una carrera si se aprieta "Enviar"
+  // apenas se abre la pantalla.
+  const adjuntosPromesaRef = useRef(null);
 
-  // Cargar estado inicial y perfil del remitente
+  // Cargar estado inicial, perfil del remitente y adjuntos
   useEffect(() => {
     loadProgress();
     loadSenderProfile();
+    adjuntosPromesaRef.current = cargarAdjuntos();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [campaign.id]);
 
@@ -141,6 +183,82 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
   };
 
   // Enviar un email (con o sin adjunto)
+  // Trae los adjuntos guardados de ESTA campaña y los deja listos para el MIME.
+  //
+  // Las columnas se piden acá y no vienen en el objeto `campaign`: la lista de
+  // campañas ya no las trae, para no descargar los adjuntos de todas las
+  // campañas cada vez que se abre esa pantalla.
+  const cargarAdjuntos = async () => {
+    setAdjuntosEstado('cargando');
+    setAdjuntosAviso(null);
+
+    // Algunas de estas columnas dependen de migraciones que pueden no estar
+    // corridas, y PostgREST falla la consulta entera si pide una que no existe.
+    // Por eso se van descartando de a una.
+    let adjCols = ['attachments', 'attachment_name', 'attachment_content_type',
+      'attachment_size', 'attachment_base64', 'attachment_path'];
+    let adjRow = null;
+
+    for (let intento = 0; intento <= adjCols.length; intento++) {
+      const { data, error: adjError } = await supabase
+        .from('bulk_email_campaigns')
+        .select(adjCols.join(', '))
+        .eq('id', campaign.id)
+        .single();
+
+      if (!adjError) { adjRow = data; break; }
+
+      const faltante = adjCols.find(c => adjError.message?.includes(c));
+      if (!faltante) break;
+      adjCols = adjCols.filter(c => c !== faltante);
+      if (adjCols.length === 0) break;
+    }
+
+    const adj = adjRow || {};
+
+    // Lista normalizada: el array `attachments` si existe, si no el adjunto
+    // único de las columnas viejas.
+    let crudos = [];
+    if (Array.isArray(adj.attachments) && adj.attachments.length > 0) {
+      crudos = adj.attachments;
+    } else if (adj.attachment_name && (adj.attachment_base64 || adj.attachment_path)) {
+      crudos = [{
+        name: adj.attachment_name,
+        content_type: adj.attachment_content_type,
+        size: adj.attachment_size,
+        base64: adj.attachment_base64 || undefined,
+        path: adj.attachment_path || undefined,
+      }];
+    }
+
+    const resueltos = [];
+    const fallados = [];
+
+    for (const a of crudos) {
+      try {
+        const resuelto = await resolverAdjunto(a);
+        if (resuelto) resueltos.push(resuelto);
+        else if (a?.name) fallados.push(a.name);
+      } catch (attachErr) {
+        // Un adjunto que falla no cancela la campaña, pero tiene que verse
+        // ANTES de mandar: el correo saldría incompleto.
+        console.warn('No se pudo cargar un adjunto:', attachErr.message);
+        fallados.push(attachErr.message);
+      }
+    }
+
+    setAdjuntos(resueltos);
+    setAdjuntosEstado('listo');
+    if (fallados.length > 0) {
+      setAdjuntosAviso(
+        `No se pudieron cargar ${fallados.length} de ${crudos.length} adjuntos ` +
+        `(${fallados.join('; ')}). Los correos saldrían sin esos archivos.`
+      );
+    }
+
+    return resueltos;
+  };
+
   const sendSingleEmail = async (queueItem, accessToken, attachments) => {
     const sender = senderProfile || profile;
     const fromEmail = sender?.email || user?.email || profile?.email;
@@ -298,98 +416,10 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
       let accessToken = await getValidAccessToken();
       addLog('Token de Gmail obtenido', 'success');
 
-      // Cargar adjuntos de la campaña (una sola vez).
-      //
-      // Se piden acá y no vienen en el objeto `campaign`: la lista de campañas
-      // ya no trae estas columnas, justamente para no descargar los adjuntos de
-      // todas las campañas cada vez que se abre la pantalla.
-      const attachmentsData = [];
-
-      // Algunas de estas columnas dependen de migraciones que pueden no estar
-      // corridas, y PostgREST falla la consulta entera si pide una que no
-      // existe. Por eso se van descartando de a una.
-      let adjCols = ['attachments', 'attachment_name', 'attachment_content_type',
-        'attachment_size', 'attachment_base64', 'attachment_path'];
-      let adjRow = null;
-
-      for (let intento = 0; intento <= adjCols.length; intento++) {
-        const { data, error: adjError } = await supabase
-          .from('bulk_email_campaigns')
-          .select(adjCols.join(', '))
-          .eq('id', campaign.id)
-          .single();
-
-        if (!adjError) { adjRow = data; break; }
-
-        const faltante = adjCols.find(c => adjError.message?.includes(c));
-        if (!faltante) break;
-        adjCols = adjCols.filter(c => c !== faltante);
-        if (adjCols.length === 0) break;
-      }
-
-      const adj = adjRow || {};
-
-      // Un adjunto puede venir de dos formas: con el contenido embebido
-      // (`base64`, campañas viejas) o con una ruta a Supabase Storage (`path`,
-      // el formato nuevo). El MIME siempre necesita base64, así que las rutas
-      // se descargan y convierten en memoria.
-      const blobToBase64 = async (blob) => {
-        const bytes = new Uint8Array(await blob.arrayBuffer());
-        let binary = '';
-        for (let k = 0; k < bytes.length; k++) binary += String.fromCharCode(bytes[k]);
-        return btoa(binary);
-      };
-
-      const resolverAdjunto = async (a) => {
-        if (!a || !a.name) return null;
-        const base = {
-          name: a.name,
-          contentType: a.content_type || a.contentType || 'application/octet-stream',
-        };
-        if (a.base64) return { ...base, base64: a.base64 };
-        if (!a.path) return null;
-
-        const { data: fileBlob, error: downloadError } = await supabase.storage
-          .from('attachments')
-          .download(a.path);
-        if (downloadError) throw new Error(`${a.name}: ${downloadError.message}`);
-        return { ...base, base64: await blobToBase64(fileBlob) };
-      };
-
-      // Lista normalizada: el array `attachments` si existe, si no el adjunto
-      // único de las columnas legacy.
-      let adjuntosCrudos = [];
-      if (Array.isArray(adj.attachments) && adj.attachments.length > 0) {
-        adjuntosCrudos = adj.attachments;
-      } else if (adj.attachment_name && (adj.attachment_base64 || adj.attachment_path)) {
-        adjuntosCrudos = [{
-          name: adj.attachment_name,
-          content_type: adj.attachment_content_type,
-          size: adj.attachment_size,
-          base64: adj.attachment_base64 || undefined,
-          path: adj.attachment_path || undefined,
-        }];
-      }
-
-      if (adjuntosCrudos.length > 0) {
-        const hayQueDescargar = adjuntosCrudos.some(a => a && !a.base64 && a.path);
-        if (hayQueDescargar) addLog('Descargando adjuntos...', 'info');
-
-        for (const a of adjuntosCrudos) {
-          try {
-            const resuelto = await resolverAdjunto(a);
-            if (resuelto) attachmentsData.push(resuelto);
-          } catch (attachErr) {
-            // Un adjunto que falla no cancela la campaña, pero el usuario tiene
-            // que enterarse de que el correo sale incompleto.
-            addLog(`Error al cargar adjunto ${attachErr.message}. Se enviará sin ese archivo.`, 'warning');
-          }
-        }
-
-        if (attachmentsData.length > 0) {
-          addLog(`${attachmentsData.length} adjunto(s) cargado(s): ${attachmentsData.map(a => a.name).join(', ')}`, 'success');
-        }
-      }
+      // Los adjuntos ya se resolvieron al abrir la pantalla. Se espera esa misma
+      // promesa en vez de volver a pedirlos: lo que se muestra arriba y lo que
+      // viaja en el correo salen de acá, así no pueden diferir.
+      const attachmentsData = await (adjuntosPromesaRef.current || cargarAdjuntos());
 
       // Obtener emails pendientes
       const { data: pendingEmails, error: fetchError } = await supabase
@@ -700,28 +730,40 @@ export const BulkEmailSender = ({ campaign, onClose, onComplete }) => {
 
           {/* Progress */}
           <div className="p-6">
-            {/* Attachment Info */}
-            {(() => {
-              const list = Array.isArray(campaign.attachments) && campaign.attachments.length > 0
-                ? campaign.attachments.map(a => ({ name: a.name, size: a.size }))
-                : (campaign.attachment_name ? [{ name: campaign.attachment_name, size: campaign.attachment_size }] : []);
-              if (list.length === 0) return null;
-              return (
-                <div className="mb-4 p-3 bg-primary-50 border border-primary-200 rounded-xl flex items-start gap-3">
-                  <Paperclip className="w-5 h-5 text-primary-500 flex-shrink-0 mt-0.5" />
-                  <div className="text-sm text-primary-700">
-                    <strong>{list.length === 1 ? 'Adjunto' : `${list.length} adjuntos`}</strong> — se {list.length === 1 ? 'incluirá' : 'incluirán'} en cada email:
-                    <ul className="mt-1 space-y-0.5">
-                      {list.map((a, idx) => (
-                        <li key={idx}>
-                          • {a.name}{a.size ? ` (${(a.size / 1024).toFixed(1)} KB)` : ''}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
+            {/* Adjuntos.
+                Se listan desde `adjuntos`, que es EXACTAMENTE lo que se va a
+                adjuntar al correo. Antes se contaban desde `campaign.attachments`,
+                una fuente distinta que la lista de campañas ya no trae, y el
+                recuadro decía "1 adjunto" cuando había 3. */}
+            {adjuntosEstado === 'cargando' && (
+              <div className="mb-4 p-3 bg-gray-50 border border-gray-200 rounded-xl flex items-center gap-3">
+                <Loader2 className="w-4 h-4 text-gray-400 animate-spin flex-shrink-0" />
+                <span className="text-sm text-gray-500">Cargando adjuntos...</span>
+              </div>
+            )}
+
+            {adjuntosEstado === 'listo' && adjuntos.length > 0 && (
+              <div className="mb-4 p-3 bg-primary-50 border border-primary-200 rounded-xl flex items-start gap-3">
+                <Paperclip className="w-5 h-5 text-primary-500 flex-shrink-0 mt-0.5" />
+                <div className="text-sm text-primary-700">
+                  <strong>{adjuntos.length === 1 ? 'Adjunto' : `${adjuntos.length} adjuntos`}</strong> — se {adjuntos.length === 1 ? 'incluirá' : 'incluirán'} en cada email:
+                  <ul className="mt-1 space-y-0.5">
+                    {adjuntos.map((a, idx) => (
+                      <li key={idx}>
+                        • {a.name}{a.size ? ` (${(a.size / 1024).toFixed(1)} KB)` : ''}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
-              );
-            })()}
+              </div>
+            )}
+
+            {adjuntosAviso && (
+              <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+                <p className="text-sm text-amber-700">{adjuntosAviso}</p>
+              </div>
+            )}
 
             {/* Progress Bar */}
             <div className="mb-6">

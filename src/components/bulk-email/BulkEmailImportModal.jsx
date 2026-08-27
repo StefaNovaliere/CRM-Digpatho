@@ -1,5 +1,5 @@
 // src/components/bulk-email/BulkEmailImportModal.jsx
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import {
   X,
   Upload,
@@ -63,6 +63,20 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState(null);
   const [warning, setWarning] = useState(null);
+  // Espejo de `warning`. Al terminar la creación hay que decidir si cerrar el
+  // modal o no, y el estado de React todavía no refleja los setWarning de ese
+  // mismo ciclo. El ref sí.
+  const warningRef = useRef(null);
+  const [creada, setCreada] = useState(false);
+
+  // Acumula un aviso de la creación. Escribe el ref además del estado, y por eso
+  // los avisos "de la creación" se agregan con esto y no con setWarning: sólo
+  // los que pasan por acá mantienen el modal abierto al terminar. El aviso de
+  // detección de headers, por ejemplo, no amerita frenar a nadie.
+  const avisar = (texto) => {
+    warningRef.current = warningRef.current ? `${warningRef.current} ${texto}` : texto;
+    setWarning(warningRef.current);
+  };
   const [previewEmail, setPreviewEmail] = useState(null);
   const [ccEmails, setCcEmails] = useState(''); // Campo CC global para toda la campaña
   // Días hasta el próximo seguimiento de los contactos de esta campaña.
@@ -127,6 +141,7 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
 
     setError(null);
     setWarning(null);
+    warningRef.current = null;
     setFile(uploadedFile);
 
     try {
@@ -451,7 +466,7 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
             // Un solo aviso: si falla el primero, fallan todos por el mismo
             // motivo (bucket inexistente o sin políticas).
             console.warn('No se pudo subir el adjunto a Storage, se usará base64:', upErr.message);
-            setWarning(prev => (prev ? prev + ' ' : '') +
+            avisar(
               'Los adjuntos se guardaron dentro de la campaña porque falta el bucket de Storage. ' +
               'Ejecutá la migración 012 para evitar errores de timeout con archivos grandes.');
             usoStorage = false;
@@ -462,7 +477,7 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
             attachmentsData.push({ ...meta, base64: await fileToBase64(f) });
           } catch (readErr) {
             console.warn('No se pudo leer el adjunto:', f.name, readErr.message);
-            setWarning(prev => (prev ? prev + ' ' : '') +
+            avisar(
               `No se pudo leer el adjunto "${f.name}": ${readErr.message}. Se omitirá.`);
           }
         }
@@ -513,10 +528,10 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
               .eq('id', campaign.id);
 
             if (legacyErr) {
-              setWarning(prev => (prev ? prev + ' ' : '') +
+              avisar(
                 'Los adjuntos no se pudieron guardar: faltan columnas en la base de datos. Ejecutá las migraciones 006 y 008.');
             } else if (attachmentsData.length > 1) {
-              setWarning(prev => (prev ? prev + ' ' : '') +
+              avisar(
                 'Falta la columna "attachments" en la base de datos: sólo se guardó el primer adjunto. Ejecutá la migración 008 para habilitar múltiples adjuntos.');
             }
           }
@@ -643,7 +658,15 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
         .update({ total_emails: queueItems.length })
         .eq('id', campaign.id);
 
-      onSuccess();
+      // Si hubo avisos, el modal NO se cierra solo: antes se llamaba
+      // onSuccess() de una y el aviso se pintaba y se destruía en el mismo
+      // ciclo, así que nadie llegaba a leerlo. Fue exactamente lo que pasó con
+      // "falta el bucket de Storage": el usuario sólo vio un 404 en la consola.
+      if (warningRef.current) {
+        setCreada(true);
+      } else {
+        onSuccess();
+      }
     } catch (err) {
       console.error('Error creating campaign:', err);
       setError('Error al crear la campaña: ' + err.message);
@@ -654,7 +677,7 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto">
-      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={creada ? onSuccess : onClose} />
       
       <div className="relative flex items-center justify-center min-h-screen p-4">
         <div className="relative w-full max-w-3xl bg-white rounded-2xl shadow-2xl overflow-hidden">
@@ -665,11 +688,12 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
               <p className="text-sm text-primary-100">
                 {step === 1 && 'Paso 1: Subí tu archivo Excel'}
                 {step === 2 && 'Paso 2: Mapeá las columnas'}
-                {step === 3 && 'Paso 3: Revisá y confirmá'}
+                {step === 3 && !creada && 'Paso 3: Revisá y confirmá'}
+                {creada && 'Campaña creada — leé los avisos'}
               </p>
             </div>
             <button
-              onClick={onClose}
+              onClick={creada ? onSuccess : onClose}
               className="p-2 text-white/80 hover:text-white hover:bg-white/20 rounded-lg transition-colors"
             >
               <X className="w-5 h-5" />
@@ -991,7 +1015,22 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
             )}
 
             {/* Step 3: Preview */}
-            {step === 3 && (
+            {creada && (
+              <div className="py-8 text-center">
+                <div className="w-14 h-14 mx-auto mb-4 rounded-full bg-green-100 flex items-center justify-center">
+                  <CheckCircle className="w-7 h-7 text-green-600" />
+                </div>
+                <h3 className="text-lg font-semibold text-gray-900 mb-1">
+                  La campaña se creó
+                </h3>
+                <p className="text-gray-500 max-w-lg mx-auto">
+                  Está lista para enviar. Antes de hacerlo, leé el aviso de arriba:
+                  no impide el envío, pero conviene resolverlo.
+                </p>
+              </div>
+            )}
+
+            {step === 3 && !creada && (
               <div className="space-y-6">
                 <div className="p-4 bg-green-50 border border-green-200 rounded-xl">
                   <p className="text-sm text-green-700">
@@ -1076,14 +1115,22 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
           {/* Footer */}
           <div className="flex items-center justify-between px-6 py-4 border-t border-gray-200 bg-gray-50">
             <button
-              onClick={step === 1 ? onClose : () => setStep(step - 1)}
+              onClick={step === 1 || creada ? onClose : () => setStep(step - 1)}
               className="btn-secondary"
+              disabled={creada}
             >
               {step === 1 ? 'Cancelar' : 'Atrás'}
             </button>
 
             <div className="flex items-center gap-3">
-              {step === 2 && (
+              {creada && (
+                <button onClick={onSuccess} className="btn-primary">
+                  <CheckCircle className="w-4 h-4" />
+                  Entendido
+                </button>
+              )}
+
+              {step === 2 && !creada && (
                 <button
                   onClick={() => setStep(3)}
                   disabled={!isValidMapping()}
@@ -1094,7 +1141,7 @@ export const BulkEmailImportModal = ({ onClose, onSuccess }) => {
                 </button>
               )}
 
-              {step === 3 && (
+              {step === 3 && !creada && (
                 <button
                   onClick={handleCreateCampaign}
                   disabled={importing || getValidEmailCount() === 0}
