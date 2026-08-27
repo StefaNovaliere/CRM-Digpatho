@@ -16,6 +16,8 @@ import {
   ChevronRight,
   Download,
   Loader2,
+  AlertTriangle,
+  RefreshCw,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
@@ -78,6 +80,7 @@ export const Contacts = () => {
   const [users, setUsers] = useState([]);
   const [selected, setSelected] = useState(new Set());
   const [exportando, setExportando] = useState(false);
+  const [loadError, setLoadError] = useState(null);
   const reloadRef = useRef(0);
 
   // Debounce de la búsqueda: sin esto se dispara una query por tecla.
@@ -186,24 +189,38 @@ export const Contacts = () => {
         query = query.or(clauses.join(','));
       }
 
-      return query;
+      // OJO: va envuelto en un objeto A PROPÓSITO, no sueltito.
+      //
+      // El query builder de Supabase es un "thenable" (tiene un método then(),
+      // que es lo que permite escribir `await query` para ejecutar la consulta).
+      // Una función async que devuelve un thenable NO resuelve con él: lo
+      // encadena, o sea que lo ejecuta y devuelve la respuesta ya resuelta.
+      // Devolver `query` directo hacía que el que llama recibiera
+      // { data, error, count } en vez del builder, y el .order().range() de
+      // después reventara con "no es una función" — la lista quedaba vacía.
+      return { query };
   }, [debouncedQuery, filterStage, filterPriority, filterCartera, filterFollowup, filterResponsable, user?.id, users, profile?.team]);
 
   const loadContacts = useCallback(async () => {
     setLoading(true);
     try {
-      const base = await construirQuery('*, institution:institutions(id, name, city)', { count: 'exact' });
+      const { query } = await construirQuery('*, institution:institutions(id, name, city)', { count: 'exact' });
       const from = page * PAGE_SIZE;
 
-      const { data, error, count } = await base
+      const { data, error, count } = await query
         .order('created_at', { ascending: false })
         .range(from, from + PAGE_SIZE - 1);
       if (error) throw error;
 
       setContacts(data || []);
       setTotalCount(count || 0);
+      setLoadError(null);
     } catch (err) {
       console.error('Error loading contacts:', err);
+      // El mensaje se muestra en pantalla. Antes esto dejaba la lista vacía y
+      // sin más, así que una consulta rota y una base sin contactos se veían
+      // exactamente igual.
+      setLoadError(err.message || 'No se pudieron cargar los contactos.');
       setContacts([]);
       setTotalCount(0);
     } finally {
@@ -265,12 +282,12 @@ export const Contacts = () => {
       const filas = [];
 
       for (let offset = 0; offset < 10000; offset += TANDA) {
-        const base = await construirQuery(
+        const { query } = await construirQuery(
           'id, first_name, last_name, email, phone, job_title, specialty, society, is_kol, ' +
           'stage, priority, assigned_to, next_followup_at, last_interaction_at, ' +
           'interaction_count, created_at, institution:institutions(name, city)'
         );
-        const { data, error } = await base
+        const { data, error } = await query
           .order('created_at', { ascending: false })
           .range(offset, offset + TANDA - 1);
         if (error) throw error;
@@ -549,6 +566,17 @@ export const Contacts = () => {
             </div>
           )}
         </>
+      ) : loadError ? (
+        <div className="card p-12 text-center">
+          <AlertTriangle size={48} className="mx-auto text-red-400 mb-4" />
+          <h3 className="text-lg font-medium text-gray-900 mb-1">No se pudieron cargar los contactos</h3>
+          <p className="text-gray-500 mb-1">Los contactos están en la base; lo que falló es esta consulta.</p>
+          <p className="text-sm text-red-600 mb-4 font-mono break-all max-w-xl mx-auto">{loadError}</p>
+          <button onClick={refresh} className="btn-secondary">
+            <RefreshCw size={18} />
+            Reintentar
+          </button>
+        </div>
       ) : (
         <div className="card p-12 text-center">
           <Users size={48} className="mx-auto text-gray-300 mb-4" />
